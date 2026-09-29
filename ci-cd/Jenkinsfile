@@ -132,7 +132,7 @@ spec:
               sh '''
                 pip install --quiet flake8==7.1.1 flake8-bugbear==24.8.19
                 flake8 --max-line-length=120 --format=pylint --output-file=flake8.txt --tee \
-                  ${APP_DIR} python/
+                  ${APP_DIR} scripts/
               '''
             }
           }
@@ -321,10 +321,15 @@ spec:
                          -m "Build: ${BUILD_URL}"
 
               # Retry on non-fast-forward (concurrent pipelines bumping other apps)
+              pushed=false
               for i in 1 2 3; do
-                git pull --rebase origin ${GITOPS_BRANCH} && git push origin HEAD:${GITOPS_BRANCH} && break
+                if git pull --rebase origin ${GITOPS_BRANCH} && git push origin HEAD:${GITOPS_BRANCH}; then
+                  pushed=true
+                  break
+                fi
                 echo "push attempt $i failed; retrying" && sleep $((i * 5))
               done
+              [ "$pushed" = true ] || { echo "GitOps push failed after 3 attempts"; exit 1; }
             '''
           }
         }

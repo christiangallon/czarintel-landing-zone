@@ -14,8 +14,10 @@
 # 3 months immediately available). Long-term (1y+) archive lives in the
 # versioned, KMS-encrypted S3 backup bucket (terraform/modules/aws).
 #
-# The monitoring namespace enforces Pod Security "restricted"; every pod below
-# runs non-root, read-only root FS, all capabilities dropped, seccomp default.
+# The monitoring namespace is PSA "privileged" (node-exporter needs host
+# access) with baseline audit/warn; Loki itself does not need that exception,
+# so every pod below meets the "restricted" profile anyway: non-root, read-only
+# root FS, all capabilities dropped, seccomp RuntimeDefault.
 # =============================================================================
 deploymentMode: SingleBinary
 

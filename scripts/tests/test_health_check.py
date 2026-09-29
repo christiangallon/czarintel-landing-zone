@@ -61,7 +61,10 @@ def test_http_latency_budget_warns(server):
 
 
 def test_http_connection_refused():
-    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
     assert hc.check_http({"url": f"http://127.0.0.1:{port}/"}, 1, False).status == "fail"
 
 

@@ -84,7 +84,7 @@ Both are stored in Jenkins' encrypted credential store, and both are candidates 
 
 Admission happens in two stages. Both must pass.
 
-1. **Pod Security Admission, `restricted` profile** (`kubernetes/namespaces.yml`, labels `pod-security.kubernetes.io/enforce: restricted`). It rejects root users, privilege escalation, host namespaces, hostPath, missing seccomp profiles and added capabilities.
+1. **Pod Security Admission, `restricted` profile** on `production` and `staging` (`kubernetes/namespaces.yml`, labels `pod-security.kubernetes.io/enforce: restricted`). It rejects root users, privilege escalation, host namespaces, hostPath, missing seccomp profiles and added capabilities. `monitoring` is the single documented exception (`privileged` enforce, `baseline` audit/warn), because node-exporter requires host PID/network access.
 2. **OPA Gatekeeper 3.17.1** (`kubernetes/opa-gatekeeper/require-labels.yml`), with every constraint set to `enforcementAction: deny`:
 
 | Constraint | Effect | Why |

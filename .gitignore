@@ -63,3 +63,8 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+# ---------------- Tool caches / generated doc exports ----
+ansible/.ansible/
+docs/**/*.docx
+docs/**/*.pdf

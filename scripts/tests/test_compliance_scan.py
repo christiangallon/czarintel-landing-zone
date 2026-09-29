@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
 import boto3
-import pytest
 from moto import mock_aws
 
 import compliance_scan as cs

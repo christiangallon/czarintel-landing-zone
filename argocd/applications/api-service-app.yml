@@ -1,0 +1,105 @@
+# -----------------------------------------------------------------------------
+# api-service — one Application per environment. Jenkins bumps image.tag in
+# values-<env>.yaml; ArgoCD detects the commit and reconciles.
+# -----------------------------------------------------------------------------
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: api-service-staging
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: api-service
+    czarintel.io/environment: staging
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: czarintel-deploys
+    notifications.argoproj.io/subscribe.on-health-degraded.slack: czarintel-deploys
+    notifications.argoproj.io/subscribe.on-deployed.slack: czarintel-deploys
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: czarintel
+  source:
+    repoURL: https://github.com/czarintel/czarintel-landing-zone.git
+    targetRevision: main
+    path: helm/api-service
+    helm:
+      releaseName: api-service
+      valueFiles:
+        - values.yaml
+        - values-staging.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true          # revert manual kubectl drift
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=false
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas      # owned by the HPA
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: api-service-production
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: api-service
+    czarintel.io/environment: production
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: czarintel-prod-alerts
+    notifications.argoproj.io/subscribe.on-health-degraded.slack: czarintel-prod-alerts
+    notifications.argoproj.io/subscribe.on-deployed.slack: czarintel-deploys
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: czarintel
+  source:
+    repoURL: https://github.com/czarintel/czarintel-landing-zone.git
+    targetRevision: main
+    path: helm/api-service
+    helm:
+      releaseName: api-service
+      valueFiles:
+        - values.yaml
+        - values-production.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: production
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=false
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+  revisionHistoryLimit: 20    # enables `argocd app rollback` to any recent release
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

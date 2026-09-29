@@ -1,0 +1,18 @@
+---
+mysql_version: "8.0"
+mysql_port: 3306
+mysql_bind_address: "0.0.0.0"
+mysql_datadir: /var/lib/mysql
+mysql_server_id: 1
+mysql_role: primary
+mysql_innodb_buffer_pool_size: "1G"
+mysql_max_connections: 500
+mysql_require_secure_transport: true
+mysql_slow_query_time: 1
+mysql_binlog_expire_seconds: 604800
+mysql_root_password: ""
+mysql_replication_user: repl
+mysql_replication_password: ""
+mysql_monitor_user: proxysql_monitor
+mysql_monitor_password: ""
+mysql_allowed_subnet: "10.%"

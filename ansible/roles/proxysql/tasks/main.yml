@@ -1,0 +1,44 @@
+---
+- name: Fail fast if credentials were not injected
+  ansible.builtin.assert:
+    that:
+      - proxysql_admin_password | length >= 16
+      - proxysql_monitor_password | length >= 16
+      - proxysql_app_password | length >= 16
+    fail_msg: "PROXYSQL_ADMIN_PASSWORD, PROXYSQL_MONITOR_PASSWORD and MYSQL_APP_PASSWORD must be exported (>=16 chars)."
+  no_log: true
+
+- name: Install ProxySQL package (Debian)
+  ansible.builtin.apt:
+    deb: "https://github.com/sysown/proxysql/releases/download/v{{ proxysql_version }}/proxysql_{{ proxysql_version }}-ubuntu22_amd64.deb"
+    state: present
+  when: ansible_os_family == 'Debian'
+
+- name: Install ProxySQL package (RHEL)
+  ansible.builtin.dnf:
+    name: "https://github.com/sysown/proxysql/releases/download/v{{ proxysql_version }}/proxysql-{{ proxysql_version }}-1-centos9.x86_64.rpm"
+    state: present
+    disable_gpg_check: false
+  when: ansible_os_family == 'RedHat'
+
+- name: Deploy proxysql.cnf (bootstrap config - applied on first start / --initial)
+  ansible.builtin.template:
+    src: proxysql.cnf.j2
+    dest: /etc/proxysql.cnf
+    owner: root
+    group: proxysql
+    mode: "0640"
+  no_log: true
+  notify: Reload proxysql config from file
+
+- name: Enable and start ProxySQL
+  ansible.builtin.systemd:
+    name: proxysql
+    state: started
+    enabled: true
+
+- name: Wait for ProxySQL MySQL listener
+  ansible.builtin.wait_for:
+    port: "{{ proxysql_mysql_port }}"
+    host: 127.0.0.1
+    timeout: 60

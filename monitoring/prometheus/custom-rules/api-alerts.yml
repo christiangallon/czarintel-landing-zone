@@ -1,0 +1,184 @@
+# -----------------------------------------------------------------------------
+# CzarIntel API SLO & platform alerts
+# SLO: 99.9% availability, p95 latency < 500ms (30-day window)
+# -----------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: czarintel-api-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: czarintel-landing-zone
+    release: kube-prometheus-stack
+spec:
+  groups:
+    # ------------------------- Recording rules ------------------------------
+    - name: czarintel-api.recording
+      interval: 30s
+      rules:
+        - record: job_namespace:http_requests:rate5m
+          expr: sum by (job, namespace) (rate(http_requests_total[5m]))
+        - record: job_namespace:http_requests_5xx:rate5m
+          expr: sum by (job, namespace) (rate(http_requests_total{status=~"5.."}[5m]))
+        - record: job_namespace:http_error_ratio:rate5m
+          expr: |
+            job_namespace:http_requests_5xx:rate5m
+              / clamp_min(job_namespace:http_requests:rate5m, 1e-9)
+        - record: job_namespace:http_request_duration_seconds:p95_5m
+          expr: |
+            histogram_quantile(0.95,
+              sum by (job, namespace, le) (rate(http_request_duration_seconds_bucket[5m])))
+
+    # ------------------------- API SLO alerts -------------------------------
+    - name: czarintel-api.slo
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            job_namespace:http_error_ratio:rate5m > 0.01
+              and job_namespace:http_requests:rate5m > 0.1
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "HTTP 5xx error rate above 1% for {{ $labels.job }} in {{ $labels.namespace }}"
+            description: "{{ $value | humanizePercentage }} of requests are failing with 5xx (threshold 1%) for the last 5 minutes."
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/wiki/runbooks#higherrorrate
+
+        - alert: HighLatency
+          expr: job_namespace:http_request_duration_seconds:p95_5m > 0.5
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "p95 latency above 500ms for {{ $labels.job }} in {{ $labels.namespace }}"
+            description: "p95 request latency is {{ $value | humanizeDuration }} (threshold 500ms)."
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/wiki/runbooks#highlatency
+
+        - alert: ErrorBudgetBurnFast
+          # Multi-window burn rate (Google SRE workbook): 14.4x burn over 1h & 5m
+          expr: |
+            (
+              sum by (namespace) (rate(http_requests_total{status=~"5.."}[1h]))
+                / clamp_min(sum by (namespace) (rate(http_requests_total[1h])), 1e-9) > (14.4 * 0.001)
+            ) and (
+              sum by (namespace) (rate(http_requests_total{status=~"5.."}[5m]))
+                / clamp_min(sum by (namespace) (rate(http_requests_total[5m])), 1e-9) > (14.4 * 0.001)
+            )
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Error budget burning 14x faster than sustainable in {{ $labels.namespace }}"
+            description: "At this rate the 30-day 99.9% error budget is exhausted in ~2 days."
+
+        - alert: ApiServiceDown
+          expr: absent(up{job=~".*api-service.*"} == 1)
+          for: 3m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "No healthy api-service targets are being scraped"
+            description: "Prometheus has not successfully scraped any api-service pod for 3 minutes."
+
+    # ------------------------- Kubernetes alerts ----------------------------
+    - name: czarintel-kubernetes
+      rules:
+        - alert: PodCrashLooping
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace=~"production|staging|monitoring"}[15m]) > 5
+          for: 1m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
+            description: "Container {{ $labels.container }} restarted {{ $value | humanize }} times in the last 15 minutes."
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/wiki/runbooks#podcrashlooping
+
+        - alert: DeploymentReplicasMismatch
+          expr: |
+            kube_deployment_spec_replicas{namespace=~"production|staging"}
+              != kube_deployment_status_replicas_available{namespace=~"production|staging"}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has unavailable replicas"
+            description: "Desired and available replica counts have differed for 15 minutes."
+
+        - alert: HPAMaxedOut
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas
+              >= kube_horizontalpodautoscaler_spec_max_replicas
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} at max replicas"
+            description: "Autoscaler has been pinned at maxReplicas for 15 minutes — raise the ceiling or add capacity."
+
+    # ------------------------- Node alerts ----------------------------------
+    - name: czarintel-nodes
+      rules:
+        - alert: NodeHighCPU
+          expr: |
+            100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 85
+          for: 10m
+          labels:
+            severity: warning
+            team: sre
+          annotations:
+            summary: "Node {{ $labels.instance }} CPU above 85%"
+            description: "CPU utilisation is {{ $value | printf \"%.1f\" }}% for 10 minutes."
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/wiki/runbooks#nodehighcpu
+
+        - alert: NodeDiskFillingUp
+          expr: |
+            predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[6h], 24 * 3600) < 0
+              and node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes < 0.2
+          for: 30m
+          labels:
+            severity: warning
+            team: sre
+          annotations:
+            summary: "Disk on {{ $labels.instance }} ({{ $labels.mountpoint }}) predicted to fill within 24h"
+
+    # ------------------------- MySQL alerts ---------------------------------
+    - name: czarintel-mysql
+      rules:
+        - alert: MySQLDown
+          expr: mysql_up == 0 or absent(mysql_up)
+          for: 1m
+          labels:
+            severity: critical
+            team: data
+          annotations:
+            summary: "MySQL is unreachable ({{ $labels.namespace }}/{{ $labels.pod }})"
+            description: "mysqld-exporter cannot connect to MySQL, or no exporter is being scraped."
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/wiki/runbooks#mysqldown
+
+        - alert: MySQLTooManyConnections
+          expr: |
+            max_over_time(mysql_global_status_threads_connected[5m])
+              / mysql_global_variables_max_connections > 0.8
+          for: 5m
+          labels:
+            severity: warning
+            team: data
+          annotations:
+            summary: "MySQL connections above 80% of max_connections"
+            description: "{{ $value | humanizePercentage }} of max_connections in use."
+
+        - alert: MySQLSlowQueries
+          expr: increase(mysql_global_status_slow_queries[5m]) > 10
+          for: 10m
+          labels:
+            severity: warning
+            team: data
+          annotations:
+            summary: "MySQL slow query rate elevated"
+            description: "{{ $value | humanize }} slow queries in the last 5 minutes."

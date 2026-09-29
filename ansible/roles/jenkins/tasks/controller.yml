@@ -1,0 +1,54 @@
+---
+- name: Ensure apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Add Jenkins LTS signing key
+  ansible.builtin.get_url:
+    url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+    dest: /etc/apt/keyrings/jenkins.asc
+    mode: "0644"
+
+- name: Add Jenkins LTS repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/jenkins.asc] https://pkg.jenkins.io/debian-stable binary/"
+    filename: jenkins
+    state: present
+
+- name: Install Jenkins LTS
+  ansible.builtin.apt:
+    name: jenkins
+    state: present
+    update_cache: true
+
+- name: Configure Jenkins systemd override (JVM options, bind to localhost behind ALB/ingress)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/jenkins.service.d/override.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # {{ ansible_managed }}
+      [Service]
+      Environment="JAVA_OPTS={{ jenkins_java_opts }}"
+      Environment="JENKINS_PORT={{ jenkins_http_port }}"
+      Environment="JENKINS_LISTEN_ADDRESS=127.0.0.1"
+      LimitNOFILE=65536
+  notify: Restart jenkins
+
+- name: Enable Jenkins
+  ansible.builtin.systemd:
+    name: jenkins
+    state: started
+    enabled: true
+
+- name: Wait for Jenkins to answer on the login page
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ jenkins_http_port }}/login"
+    status_code: [200, 403]
+  register: jenkins_up
+  retries: 30
+  delay: 10
+  until: jenkins_up.status in [200, 403]

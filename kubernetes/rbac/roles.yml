@@ -1,0 +1,205 @@
+# -----------------------------------------------------------------------------
+# Least-privilege RBAC — groups map to Entra ID / IAM Identity Center groups
+# via EKS access entries, AKS Azure RBAC, and GKE Google Groups for RBAC.
+#
+#   czarintel:platform-admins → cluster-wide admin (break-glass, PIM-gated)
+#   czarintel:sre             → cluster-wide read + restart/scale in workloads
+#   czarintel:developers      → edit in staging, read-only in production
+#   czarintel:auditors        → read-only everywhere, NO secrets
+# -----------------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: czarintel-read-only
+  labels:
+    app.kubernetes.io/part-of: czarintel-landing-zone
+rules:
+  - apiGroups: ["", "apps", "batch", "autoscaling", "policy", "networking.k8s.io"]
+    resources:
+      - pods
+      - pods/log
+      - services
+      - endpoints
+      - configmaps
+      - persistentvolumeclaims
+      - events
+      - namespaces
+      - nodes
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+      - jobs
+      - cronjobs
+      - horizontalpodautoscalers
+      - poddisruptionbudgets
+      - ingresses
+      - networkpolicies
+    verbs: ["get", "list", "watch"]
+  # Explicitly no "secrets" — auditors must not read credentials
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: czarintel-sre-operator
+  labels:
+    app.kubernetes.io/part-of: czarintel-landing-zone
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        czarintel.io/aggregate-to-sre: "true"
+rules: []
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: czarintel-sre-operator-base
+  labels:
+    czarintel.io/aggregate-to-sre: "true"
+rules:
+  - apiGroups: ["", "apps", "batch", "autoscaling", "policy", "networking.k8s.io", "monitoring.coreos.com"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["patch"]            # kubectl rollout restart
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/portforward"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["patch"]            # cordon / uncordon
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]           # drain
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: czarintel-developer
+  labels:
+    app.kubernetes.io/part-of: czarintel-landing-zone
+rules:
+  - apiGroups: ["", "apps", "batch", "autoscaling", "policy"]
+    resources:
+      - pods
+      - pods/log
+      - services
+      - configmaps
+      - deployments
+      - replicasets
+      - statefulsets
+      - jobs
+      - cronjobs
+      - horizontalpodautoscalers
+      - poddisruptionbudgets
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/portforward"]
+    verbs: ["create"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+# ------------------------------- Bindings -----------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: czarintel-platform-admins
+subjects:
+  - kind: Group
+    name: czarintel:platform-admins
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: czarintel-sre
+subjects:
+  - kind: Group
+    name: czarintel:sre
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: czarintel-sre-operator
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: czarintel-auditors
+subjects:
+  - kind: Group
+    name: czarintel:auditors
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: czarintel-read-only
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: developers-edit
+  namespace: staging
+subjects:
+  - kind: Group
+    name: czarintel:developers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: czarintel-developer
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: developers-read-only
+  namespace: production
+subjects:
+  - kind: Group
+    name: czarintel:developers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: czarintel-read-only
+  apiGroup: rbac.authorization.k8s.io
+---
+# ------------------------ CI/CD service accounts ----------------------------
+# Jenkins only needs to read deployment status in production (ArgoCD deploys)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-deploy-reader
+  namespace: production
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-deploy-reader
+  namespace: production
+subjects:
+  - kind: ServiceAccount
+    name: jenkins
+    namespace: jenkins
+roleRef:
+  kind: Role
+  name: ci-deploy-reader
+  apiGroup: rbac.authorization.k8s.io

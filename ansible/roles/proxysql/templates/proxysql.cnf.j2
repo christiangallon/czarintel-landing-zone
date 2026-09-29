@@ -1,0 +1,55 @@
+# {{ ansible_managed }}
+# CzarIntel ProxySQL - writer HG {{ proxysql_writer_hostgroup }}, reader HG {{ proxysql_reader_hostgroup }}
+datadir="/var/lib/proxysql"
+
+admin_variables=
+{
+    admin_credentials="{{ proxysql_admin_user }}:{{ proxysql_admin_password }}"
+    mysql_ifaces="127.0.0.1:{{ proxysql_admin_port }}"
+    restapi_enabled=true
+    restapi_port=6070
+}
+
+mysql_variables=
+{
+    threads=4
+    max_connections={{ proxysql_max_connections }}
+    interfaces="0.0.0.0:{{ proxysql_mysql_port }}"
+    default_schema="information_schema"
+    server_version="8.0.36"
+    monitor_username="{{ proxysql_monitor_user }}"
+    monitor_password="{{ proxysql_monitor_password }}"
+    monitor_connect_interval=10000
+    monitor_ping_interval=5000
+    monitor_read_only_interval=1500
+    monitor_replication_lag_interval=2000
+    have_ssl=true
+    ssl_p2s_ca="/etc/ssl/certs/ca-certificates.crt"
+    connect_timeout_server=3000
+    query_retries_on_failure=1
+}
+
+mysql_servers=
+(
+{% for h in proxysql_backends %}
+    { address="{{ hostvars[h].ansible_host | default(h) }}", port={{ hostvars[h].mysql_port | default(3306) }}, hostgroup={{ proxysql_writer_hostgroup if hostvars[h].mysql_role | default('replica') == 'primary' else proxysql_reader_hostgroup }}, max_connections=500, max_replication_lag=10, use_ssl=1 }{{ "," if not loop.last else "" }}
+{% endfor %}
+)
+
+# Automatic failover: hosts with read_only=0 move to writer HG
+mysql_replication_hostgroups=
+(
+    { writer_hostgroup={{ proxysql_writer_hostgroup }}, reader_hostgroup={{ proxysql_reader_hostgroup }}, check_type="read_only", comment="czarintel-cluster" }
+)
+
+mysql_users=
+(
+    { username="{{ proxysql_app_user }}", password="{{ proxysql_app_password }}", default_hostgroup={{ proxysql_writer_hostgroup }}, transaction_persistent=1, active=1, use_ssl=1 }
+)
+
+# Read/write split: SELECT ... FOR UPDATE -> writer, other SELECT -> readers
+mysql_query_rules=
+(
+    { rule_id=100, active=1, match_digest="^SELECT.*FOR UPDATE", destination_hostgroup={{ proxysql_writer_hostgroup }}, apply=1 },
+    { rule_id=200, active=1, match_digest="^SELECT", destination_hostgroup={{ proxysql_reader_hostgroup }}, apply=1 }
+)

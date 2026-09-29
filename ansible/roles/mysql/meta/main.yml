@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: mysql
+  author: CzarIntel Platform Engineering
+  description: MySQL 8.0 with GTID replication, TLS-only transport and CIS MySQL hardening
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+dependencies: []

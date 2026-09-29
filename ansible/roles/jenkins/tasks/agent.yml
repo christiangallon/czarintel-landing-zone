@@ -1,0 +1,67 @@
+---
+- name: Install agent build packages
+  ansible.builtin.package:
+    name: "{{ jenkins_agent_packages }}"
+    state: present
+
+- name: Install Trivy (image + IaC scanning stage)
+  ansible.builtin.apt:
+    deb: "https://github.com/aquasecurity/trivy/releases/download/v{{ jenkins_trivy_version }}/trivy_{{ jenkins_trivy_version }}_Linux-64bit.deb"
+    state: present
+  when: ansible_os_family == 'Debian'
+
+- name: Download Helm
+  ansible.builtin.unarchive:
+    src: "https://get.helm.sh/helm-v{{ jenkins_helm_version }}-linux-amd64.tar.gz"
+    dest: /opt
+    remote_src: true
+    creates: /opt/linux-amd64/helm
+
+- name: Install Helm binary
+  ansible.builtin.copy:
+    src: /opt/linux-amd64/helm
+    dest: /usr/local/bin/helm
+    remote_src: true
+    mode: "0755"
+
+- name: Install kubectl
+  ansible.builtin.get_url:
+    url: "https://dl.k8s.io/release/v{{ jenkins_kubectl_version }}/bin/linux/amd64/kubectl"
+    checksum: "sha256:https://dl.k8s.io/release/v{{ jenkins_kubectl_version }}/bin/linux/amd64/kubectl.sha256"
+    dest: /usr/local/bin/kubectl
+    mode: "0755"
+
+- name: Create agent work directory
+  ansible.builtin.file:
+    path: "{{ jenkins_agent_home }}/agent"
+    state: directory
+    owner: "{{ jenkins_agent_user }}"
+    group: "{{ jenkins_agent_user }}"
+    mode: "0750"
+
+- name: Install inbound agent systemd unit (WebSocket, no inbound ports opened)
+  ansible.builtin.template:
+    src: jenkins-agent.service.j2
+    dest: /etc/systemd/system/jenkins-agent.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: jenkins_agent_unit
+
+- name: Write agent secret env file (root-only, never logged)
+  ansible.builtin.copy:
+    dest: /etc/jenkins-agent.env
+    content: "JENKINS_AGENT_SECRET={{ lookup('env', 'JENKINS_AGENT_SECRET') }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: lookup('env', 'JENKINS_AGENT_SECRET') | length > 0
+
+- name: Enable jenkins-agent when a secret has been provisioned
+  ansible.builtin.systemd:
+    name: jenkins-agent
+    state: "{{ 'restarted' if jenkins_agent_unit.changed else 'started' }}"
+    enabled: true
+    daemon_reload: true
+  when: lookup('env', 'JENKINS_AGENT_SECRET') | length > 0

@@ -1,0 +1,292 @@
+# -----------------------------------------------------------------------------
+# Jenkins controller on Kubernetes
+#   - Dedicated namespace, non-root, persistent JENKINS_HOME
+#   - Agents are ephemeral pods (kubernetes plugin) using jenkins-agent SA
+#   - Controller runs 0 executors: builds never run on the controller
+#   - Exposed internally only; reach via ingress behind SSO / VPN
+# kubectl apply -f ci-cd/jenkins/jenkins-deployment.yml
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jenkins
+  labels:
+    czarintel.io/environment: shared
+    czarintel.io/owner: platform-engineering
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins
+  namespace: jenkins
+  labels:
+    app.kubernetes.io/name: jenkins
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins-agent
+  namespace: jenkins
+  labels:
+    app.kubernetes.io/name: jenkins-agent
+  annotations:
+    # IRSA role allowing ECR push only (see terraform/modules/aws)
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/czarintel-prod-jenkins-agent
+---
+# Controller may only manage agent pods inside its own namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: jenkins-agent-manager
+  namespace: jenkins
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-agent-manager
+  namespace: jenkins
+subjects:
+  - kind: ServiceAccount
+    name: jenkins
+    namespace: jenkins
+roleRef:
+  kind: Role
+  name: jenkins-agent-manager
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jenkins-home
+  namespace: jenkins
+  labels:
+    app.kubernetes.io/name: jenkins
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jenkins-plugins
+  namespace: jenkins
+data:
+  plugins.txt: |
+    configuration-as-code:1850.va_a_8c31d3158b_
+    kubernetes:4295.v7fa_01b_309c95
+    workflow-aggregator:600.vb_57cdd26fdd7
+    git:5.5.2
+    ssh-agent:376.v8933585c69d3
+    credentials-binding:681.vf91669a_32e45
+    aws-credentials:231.v08a_59f17d742
+    pipeline-utility-steps:2.17.0
+    warnings-ng:11.10.0
+    coverage:1.16.1
+    junit:1300.v03d9d8a_cf1fb_
+    ansicolor:1.0.4
+    timestamper:1.27
+    ws-cleanup:0.46
+    oic-auth:4.418.vccc7061f5b_6d
+    matrix-auth:3.2.3
+  jenkins.yaml: |
+    jenkins:
+      systemMessage: "CzarIntel CI — managed by JCasC. Manual changes will be overwritten."
+      numExecutors: 0
+      mode: EXCLUSIVE
+      securityRealm:
+        oic:
+          clientId: "${OIDC_CLIENT_ID}"
+          clientSecret: "${OIDC_CLIENT_SECRET}"
+          wellKnownOpenIDConfigurationUrl: "https://login.microsoftonline.com/${OIDC_TENANT_ID}/v2.0/.well-known/openid-configuration"
+          userNameField: "preferred_username"
+          groupsFieldName: "groups"
+          scopes: "openid profile email"
+      authorizationStrategy:
+        globalMatrix:
+          entries:
+            - group:
+                name: "czarintel-platform-admins"
+                permissions: ["Overall/Administer"]
+            - group:
+                name: "czarintel-developers"
+                permissions: ["Overall/Read", "Job/Read", "Job/Build", "Job/Cancel"]
+      clouds:
+        - kubernetes:
+            name: "kubernetes"
+            namespace: "jenkins"
+            jenkinsUrl: "http://jenkins.jenkins.svc.cluster.local:8080"
+            jenkinsTunnel: "jenkins-agent.jenkins.svc.cluster.local:50000"
+            containerCapStr: "20"
+            podRetention: "never"
+    security:
+      globalJobDslSecurityConfiguration:
+        useScriptSecurity: true
+    unclassified:
+      location:
+        url: "https://jenkins.czarintel.io/"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jenkins
+  namespace: jenkins
+  labels:
+    app.kubernetes.io/name: jenkins
+    czarintel.io/owner: platform-engineering
+    czarintel.io/cost-center: CZ-1000
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # RWO volume — never run two controllers
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jenkins
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: jenkins
+        czarintel.io/owner: platform-engineering
+        czarintel.io/cost-center: CZ-1000
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /prometheus
+    spec:
+      serviceAccountName: jenkins
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: install-plugins
+          image: jenkins/jenkins:2.462.3-lts-jdk17
+          command: ["jenkins-plugin-cli", "--plugin-file", "/config/plugins.txt", "--plugin-download-directory", "/var/jenkins_home/plugins"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - { name: jenkins-home, mountPath: /var/jenkins_home }
+            - { name: config, mountPath: /config }
+      containers:
+        - name: jenkins
+          image: jenkins/jenkins:2.462.3-lts-jdk17
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: agent, containerPort: 50000 }
+          env:
+            - name: JAVA_OPTS
+              value: >-
+                -Djenkins.install.runSetupWizard=false
+                -XX:MaxRAMPercentage=75.0
+                -Dhudson.model.DirectoryBrowserSupport.CSP="default-src 'self'"
+            - name: CASC_JENKINS_CONFIG
+              value: /config/jenkins.yaml
+          envFrom:
+            - secretRef:
+                name: jenkins-oidc     # OIDC_CLIENT_ID / OIDC_CLIENT_SECRET / OIDC_TENANT_ID
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 500m, memory: 2Gi }
+            limits:   { cpu: "2", memory: 4Gi }
+          startupProbe:
+            httpGet: { path: /login, port: http }
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /login, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet: { path: /login, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          volumeMounts:
+            - { name: jenkins-home, mountPath: /var/jenkins_home }
+            - { name: config, mountPath: /config, readOnly: true }
+      volumes:
+        - name: jenkins-home
+          persistentVolumeClaim:
+            claimName: jenkins-home
+        - name: config
+          configMap:
+            name: jenkins-plugins
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins
+  namespace: jenkins
+  labels:
+    app.kubernetes.io/name: jenkins
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: jenkins
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins-agent
+  namespace: jenkins
+  labels:
+    app.kubernetes.io/name: jenkins
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: jenkins
+  ports:
+    - { name: agent, port: 50000, targetPort: agent }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jenkins
+  namespace: jenkins
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,203.0.113.10/32"
+    nginx.ingress.kubernetes.io/proxy-body-size: 50m
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["jenkins.czarintel.io"]
+      secretName: jenkins-tls
+  rules:
+    - host: jenkins.czarintel.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: jenkins
+                port:
+                  number: 8080

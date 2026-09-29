@@ -1,0 +1,9 @@
+---
+- name: 3.x | Deploy CIS kernel network parameters
+  ansible.builtin.template:
+    src: sysctl-cis.conf.j2
+    dest: /etc/sysctl.d/60-cis-czarintel.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sysctl

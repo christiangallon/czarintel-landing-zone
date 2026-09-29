@@ -1,0 +1,63 @@
+---
+- name: 1.1.1 | Disable unused filesystems and uncommon protocols
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/cis-czarintel.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (cis_hardening) - CIS 1.1.1 / 3.4
+      {% for m in (cis_disabled_filesystems + cis_disabled_protocols) | difference(cis_extra_kernel_modules_allowed) %}
+      install {{ m }} /bin/false
+      blacklist {{ m }}
+      {% endfor %}
+
+- name: 1.1.1 | Unload disabled modules if currently loaded
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: absent
+  loop: "{{ (cis_disabled_filesystems + cis_disabled_protocols) | difference(cis_extra_kernel_modules_allowed) }}"
+  failed_when: false
+
+- name: 1.1.2-1.1.5 | Mount /tmp as tmpfs with nodev,nosuid,noexec
+  ansible.posix.mount:
+    path: /tmp
+    src: tmpfs
+    fstype: tmpfs
+    opts: "{{ cis_tmp_mount_options }}"
+    state: mounted
+  when: cis_manage_tmp_mount | bool
+  notify: Remount tmp
+
+- name: 1.1.8-1.1.10 | Harden /dev/shm
+  ansible.posix.mount:
+    path: /dev/shm
+    src: tmpfs
+    fstype: tmpfs
+    opts: defaults,nodev,nosuid,noexec
+    state: mounted
+
+- name: 1.1.22 | Find world-writable directories without sticky bit
+  ansible.builtin.shell: |
+    set -o pipefail
+    df --local -P | awk 'NR!=1 {print $6}' \
+      | xargs -I '{}' find '{}' -xdev -type d \( -perm -0002 -a ! -perm -1000 \) -print 2>/dev/null
+  args:
+    executable: /bin/bash
+  register: cis_ww_dirs
+  changed_when: false
+  failed_when: false
+
+- name: 1.1.22 | Apply sticky bit
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: "a+t"
+  loop: "{{ cis_ww_dirs.stdout_lines | default([]) }}"
+
+- name: 1.5.1 | Restrict core dumps
+  ansible.builtin.copy:
+    dest: /etc/security/limits.d/99-cis-core.conf
+    content: "* hard core 0\n"
+    owner: root
+    group: root
+    mode: "0644"

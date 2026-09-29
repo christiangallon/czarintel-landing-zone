@@ -1,0 +1,49 @@
+---
+- name: 2.x | Remove legacy/insecure packages
+  ansible.builtin.package:
+    name: "{{ cis_removed_packages }}"
+    state: absent
+
+- name: 2.1.1 | Ensure time synchronisation (chrony) is installed
+  ansible.builtin.package:
+    name: chrony
+    state: present
+
+- name: 2.1.1 | Configure chrony servers
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: "{{ '/etc/chrony/chrony.conf' if ansible_os_family == 'Debian' else '/etc/chrony.conf' }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: cis_chrony_conf
+
+- name: 2.1.1 | Enable chrony
+  ansible.builtin.service:
+    name: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
+    state: "{{ 'restarted' if cis_chrony_conf.changed else 'started' }}"
+    enabled: true
+
+- name: 1.7 | Login warning banners
+  ansible.builtin.copy:
+    dest: "{{ item }}"
+    content: "{{ cis_banner }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - /etc/issue
+    - /etc/issue.net
+    - /etc/motd
+
+- name: 1.9 | Install unattended security updates (Debian)
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+  when: ansible_os_family == 'Debian'
+
+- name: 1.9 | Install dnf-automatic (RHEL)
+  ansible.builtin.dnf:
+    name: dnf-automatic
+    state: present
+  when: ansible_os_family == 'RedHat'

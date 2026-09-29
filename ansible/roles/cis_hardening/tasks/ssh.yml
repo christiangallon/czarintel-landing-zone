@@ -1,0 +1,27 @@
+---
+- name: 5.2.1 | Deploy hardened sshd_config
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: "0600"
+    validate: /usr/sbin/sshd -t -f %s
+    backup: true
+  notify: Restart sshd
+
+- name: 5.2.2 | Find host private keys
+  ansible.builtin.find:
+    paths: /etc/ssh
+    patterns: "ssh_host_*_key"
+  register: cis_ssh_host_keys
+
+- name: 5.2.2 | Set host key permissions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop: "{{ cis_ssh_host_keys.files }}"
+  loop_control:
+    label: "{{ item.path }}"

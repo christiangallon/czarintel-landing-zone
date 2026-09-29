@@ -1,0 +1,36 @@
+---
+# -----------------------------------------------------------------------------
+# CIS hardening entrypoint. Each file maps to a CIS section; tags let auditors
+# re-run a single control family:  ansible-playbook harden.yml --tags cis_ssh
+# Compliance mapping: NIST 800-53 CM-6/CM-7/AC-17/AU-2, PCI-DSS 2.2, HIPAA 164.312(b)
+# -----------------------------------------------------------------------------
+- name: Assert supported platform
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family in ['Debian', 'RedHat']
+    fail_msg: "cis_hardening supports Ubuntu and RHEL-family only (got {{ ansible_distribution }})"
+  tags: always
+
+- name: Section 1.1 - Filesystem configuration
+  ansible.builtin.import_tasks: filesystems.yml
+  tags: [cis, cis_filesystems]
+
+- name: Section 1.5 / 2 - Services and packages
+  ansible.builtin.import_tasks: services.yml
+  tags: [cis, cis_services]
+
+- name: Section 3 - Network parameters
+  ansible.builtin.import_tasks: sysctl.yml
+  tags: [cis, cis_network]
+
+- name: Section 4.1 - auditd
+  ansible.builtin.import_tasks: auditd.yml
+  tags: [cis, cis_auditd]
+
+- name: Section 5.2 - SSH server
+  ansible.builtin.import_tasks: ssh.yml
+  tags: [cis, cis_ssh]
+
+- name: Section 5.4 - User accounts and environment
+  ansible.builtin.import_tasks: accounts.yml
+  tags: [cis, cis_accounts]

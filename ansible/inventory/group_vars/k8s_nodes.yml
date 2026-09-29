@@ -1,0 +1,12 @@
+---
+# Kubelet/CNI require IP forwarding and bridged traffic inspection.
+cis_ip_forward_allowed: true
+cis_extra_kernel_modules_allowed:
+  - overlay
+  - br_netfilter
+# Container runtime on managed node groups is containerd - skip Docker role.
+fluent_bit_extra_inputs:
+  - name: tail
+    path: /var/log/containers/*.log
+    tag: kube.*
+    parser: cri

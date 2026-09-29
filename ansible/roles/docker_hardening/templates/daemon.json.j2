@@ -1,0 +1,17 @@
+{#- {{ ansible_managed }} - CIS Docker Benchmark aligned -#}
+{% set cfg = {
+  "icc": docker_icc,
+  "live-restore": docker_live_restore,
+  "no-new-privileges": docker_no_new_privileges,
+  "userland-proxy": false,
+  "log-driver": "json-file",
+  "log-opts": {"max-size": docker_log_max_size, "max-file": docker_log_max_file},
+  "default-ulimits": {"nofile": {"Name": "nofile", "Soft": docker_default_ulimit_nofile.split(':')[0] | int, "Hard": docker_default_ulimit_nofile.split(':')[1] | int}},
+  "insecure-registries": docker_insecure_registries,
+  "registry-mirrors": docker_registry_mirrors,
+  "experimental": false,
+  "features": {"buildkit": true}
+} %}
+{% if docker_userns_remap | length > 0 %}{% set _ = cfg.update({"userns-remap": docker_userns_remap}) %}{% endif %}
+{% if docker_seccomp_profile | length > 0 %}{% set _ = cfg.update({"seccomp-profile": docker_seccomp_profile}) %}{% endif %}
+{{ cfg | to_nice_json(indent=2) }}

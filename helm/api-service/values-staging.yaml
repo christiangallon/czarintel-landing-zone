@@ -1,0 +1,55 @@
+# Staging — AKS (Azure). Lower footprint, verbose logging, Workload Identity.
+replicaCount: 2
+
+image:
+  repository: acrczarintelstg.azurecr.io/czarintel/api-service
+  tag: "1.0.0"
+
+serviceAccount:
+  annotations:
+    azure.workload.identity/client-id: "00000000-0000-0000-0000-000000000000"
+
+podAnnotations:
+  azure.workload.identity/use: "true"
+
+config:
+  APP_ENV: staging
+  LOG_LEVEL: DEBUG
+  DB_HOST: mysql.staging.svc.cluster.local
+  DB_PORT: "3306"
+
+existingSecret: api-service-db
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: api.stg.czarintel.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: api-stg-tls
+      hosts:
+        - api.stg.czarintel.io
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 96Mi
+  limits:
+    cpu: 250m
+    memory: 192Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 75
+
+metrics:
+  serviceMonitor:
+    enabled: true

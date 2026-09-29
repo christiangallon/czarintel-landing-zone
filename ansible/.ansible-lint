@@ -1,0 +1,10 @@
+---
+profile: production
+exclude_paths:
+  - collections/
+  - .facts_cache/
+skip_list:
+  - fqcn[canonical]              # we pin community.mysql in requirements.yml
+  - var-naming[no-role-prefix]   # group_vars share names across roles intentionally
+warn_list:
+  - experimental

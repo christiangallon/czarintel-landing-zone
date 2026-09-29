@@ -1,0 +1,29 @@
+---
+# ---------------------------------------------------------------------------
+# Global settings applied to every host
+# ---------------------------------------------------------------------------
+org_name: czarintel
+environment_name: production
+ntp_servers:
+  - 169.254.169.123   # AWS Time Sync (link-local)
+  - time.google.com
+timezone: UTC
+
+# Bastion / jump host (set to "" when running from inside the VPC or via SSM)
+bastion_host: ""
+ansible_ssh_common_args: "{{ '-o ProxyJump=' ~ bastion_host if bastion_host | length > 0 else '' }}"
+
+# Accounts allowed to SSH in. Authentication is via short-lived SSH
+# certificates signed by the org CA (HashiCorp Vault SSH engine).
+ssh_allowed_groups:
+  - ansible
+  - sre
+ssh_trusted_user_ca_keys: /etc/ssh/trusted-user-ca-keys.pem
+
+# Central log / metrics endpoints
+fluent_bit_output_host: loki-gateway.monitoring.svc.cluster.local
+fluent_bit_output_port: 3100
+node_exporter_version: "1.8.2"
+
+# CIS profile: 1 = Level 1 only, 2 = Level 1 + Level 2
+cis_level: 2

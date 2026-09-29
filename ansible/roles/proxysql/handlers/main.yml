@@ -1,0 +1,11 @@
+---
+# --reload merges proxysql.cnf into the on-disk config DB, then restart applies it
+- name: Reload proxysql config from file
+  ansible.builtin.command: proxysql --reload -c /etc/proxysql.cnf
+  changed_when: true
+  notify: Restart proxysql
+
+- name: Restart proxysql
+  ansible.builtin.systemd:
+    name: proxysql
+    state: restarted

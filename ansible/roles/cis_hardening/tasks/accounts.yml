@@ -1,0 +1,52 @@
+---
+- name: 5.4.1 | Password ageing defaults
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: "^{{ item.key }}\\s"
+    line: "{{ item.key }}\t{{ item.value }}"
+  loop:
+    - { key: PASS_MAX_DAYS, value: "{{ cis_pass_max_days }}" }
+    - { key: PASS_MIN_DAYS, value: "{{ cis_pass_min_days }}" }
+    - { key: PASS_WARN_AGE, value: "{{ cis_pass_warn_age }}" }
+    - { key: UMASK, value: "{{ cis_umask }}" }
+
+- name: 5.4.4-5.4.5 | Default umask and shell timeout
+  ansible.builtin.copy:
+    dest: /etc/profile.d/99-cis-czarintel.sh
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible - CIS 5.4.4 / 5.4.5
+      umask {{ cis_umask }}
+      readonly TMOUT={{ cis_shell_timeout }}
+      export TMOUT
+
+- name: 5.6 | Restrict su to the sudo/wheel group
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/su
+    regexp: '^#?\s*auth\s+required\s+pam_wheel\.so'
+    line: "auth required pam_wheel.so use_uid group={{ 'sudo' if ansible_os_family == 'Debian' else 'wheel' }}"
+
+- name: 5.3 | Log all sudo commands to a dedicated file
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/90-cis-logging
+    owner: root
+    group: root
+    mode: "0440"
+    content: |
+      Defaults use_pty
+      Defaults logfile="/var/log/sudo.log"
+    validate: /usr/sbin/visudo -cf %s
+
+- name: 6.1 | Ensure permissions on critical account files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: /etc/passwd, group: root, mode: "0644" }
+    - { path: /etc/group, group: root, mode: "0644" }
+    - { path: /etc/shadow, group: "{{ 'shadow' if ansible_os_family == 'Debian' else 'root' }}", mode: "0640" }
+    - { path: /etc/gshadow, group: "{{ 'shadow' if ansible_os_family == 'Debian' else 'root' }}", mode: "0640" }

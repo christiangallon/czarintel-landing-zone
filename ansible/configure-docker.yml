@@ -1,0 +1,9 @@
+---
+# CIS Docker Benchmark hardening for hosts that run the Docker daemon
+# (Jenkins build agents). K8s nodes use containerd and are excluded.
+- name: Install and harden Docker
+  hosts: docker_hosts
+  serial: 1
+  roles:
+    - role: docker_hardening
+      tags: [docker]

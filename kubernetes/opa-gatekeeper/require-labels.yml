@@ -1,0 +1,200 @@
+# -----------------------------------------------------------------------------
+# OPA Gatekeeper policies
+#   1. K8sRequiredLabels  — ownership/cost labels on workloads & namespaces
+#   2. K8sAllowedRepos    — images only from approved registries
+#   3. K8sBlockLatestTag  — no mutable :latest tags
+# Apply ConstraintTemplates first, wait for CRDs, then Constraints:
+#   kubectl apply -f require-labels.yml   (re-run once CRDs are Established)
+# -----------------------------------------------------------------------------
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+  annotations:
+    description: Requires resources to carry the specified labels, optionally matching a regex.
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            message:
+              type: string
+            labels:
+              type: array
+              items:
+                type: object
+                properties:
+                  key:
+                    type: string
+                  allowedRegex:
+                    type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlabels
+
+        get_message(parameters, _default) := msg {
+          not parameters.message
+          msg := _default
+        }
+
+        get_message(parameters, _default) := msg {
+          msg := parameters.message
+        }
+
+        violation[{"msg": msg, "details": {"missing_labels": missing}}] {
+          provided := {label | input.review.object.metadata.labels[label]}
+          required := {label | label := input.parameters.labels[_].key}
+          missing := required - provided
+          count(missing) > 0
+          def_msg := sprintf("%v/%v is missing required labels: %v",
+            [input.review.kind.kind, input.review.object.metadata.name, missing])
+          msg := get_message(input.parameters, def_msg)
+        }
+
+        violation[{"msg": msg}] {
+          value := input.review.object.metadata.labels[key]
+          expected := input.parameters.labels[_]
+          expected.key == key
+          expected.allowedRegex != ""
+          not regex.match(expected.allowedRegex, value)
+          def_msg := sprintf("Label <%v: %v> does not satisfy regex: %v",
+            [key, value, expected.allowedRegex])
+          msg := get_message(input.parameters, def_msg)
+        }
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: workloads-must-have-ownership-labels
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+    namespaces: ["production", "staging"]
+  parameters:
+    message: "Workloads must declare app.kubernetes.io/name, czarintel.io/owner and czarintel.io/cost-center labels."
+    labels:
+      - key: app.kubernetes.io/name
+        allowedRegex: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+      - key: czarintel.io/owner
+        allowedRegex: "^[a-z0-9-]+$"
+      - key: czarintel.io/cost-center
+        allowedRegex: "^CZ-[0-9]{4}$"
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: namespaces-must-declare-environment
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Namespace"]
+    excludedNamespaces: ["kube-system", "kube-public", "kube-node-lease", "default", "gatekeeper-system"]
+  parameters:
+    labels:
+      - key: czarintel.io/environment
+        allowedRegex: "^(production|staging|shared|dev)$"
+---
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sallowedrepos
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sAllowedRepos
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            repos:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sallowedrepos
+
+        containers[c] { c := input.review.object.spec.containers[_] }
+        containers[c] { c := input.review.object.spec.initContainers[_] }
+        containers[c] { c := input.review.object.spec.ephemeralContainers[_] }
+
+        violation[{"msg": msg}] {
+          container := containers[_]
+          not startswith_any(container.image, input.parameters.repos)
+          msg := sprintf("container <%v> image <%v> is not from an approved registry: %v",
+            [container.name, container.image, input.parameters.repos])
+        }
+
+        startswith_any(image, repos) {
+          startswith(image, repos[_])
+        }
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sAllowedRepos
+metadata:
+  name: approved-registries-only
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    namespaces: ["production", "staging"]
+  parameters:
+    repos:
+      - "123456789012.dkr.ecr.us-east-1.amazonaws.com/"
+      - "acrczarintelprod.azurecr.io/"
+      - "us-central1-docker.pkg.dev/czarintel-data-prod/"
+      - "docker.io/library/mysql:"
+      - "quay.io/prometheus/"
+---
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sblocklatesttag
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sBlockLatestTag
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sblocklatesttag
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          endswith(container.image, ":latest")
+          msg := sprintf("container <%v> uses the mutable :latest tag", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not contains(container.image, ":")
+          not contains(container.image, "@sha256")
+          msg := sprintf("container <%v> image has no tag (implicit :latest)", [container.name])
+        }
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sBlockLatestTag
+metadata:
+  name: block-latest-tag
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    namespaces: ["production", "staging"]

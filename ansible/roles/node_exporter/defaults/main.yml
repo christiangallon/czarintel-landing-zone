@@ -1,0 +1,15 @@
+---
+node_exporter_version: "1.8.2"
+node_exporter_arch: "{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"
+node_exporter_listen: "0.0.0.0:9100"
+node_exporter_release_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}"
+node_exporter_user: node_exporter
+node_exporter_bin: /usr/local/bin/node_exporter
+node_exporter_collectors_enabled:
+  - systemd
+  - processes
+  - mountstats
+node_exporter_collectors_disabled:
+  - wifi
+  - infiniband
+node_exporter_textfile_dir: /var/lib/node_exporter/textfile

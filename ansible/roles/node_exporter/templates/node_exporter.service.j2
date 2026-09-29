@@ -1,0 +1,38 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Prometheus Node Exporter
+Documentation=https://github.com/prometheus/node_exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User={{ node_exporter_user }}
+Group={{ node_exporter_user }}
+ExecStart={{ node_exporter_bin }} \
+    --web.listen-address={{ node_exporter_listen }} \
+    --collector.textfile.directory={{ node_exporter_textfile_dir }} \
+{% for c in node_exporter_collectors_enabled %}
+    --collector.{{ c }} \
+{% endfor %}
+{% for c in node_exporter_collectors_disabled %}
+    --no-collector.{{ c }} \
+{% endfor %}
+    --collector.filesystem.mount-points-exclude=^/(dev|proc|run|sys|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
+Restart=on-failure
+RestartSec=5
+
+# systemd sandboxing
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

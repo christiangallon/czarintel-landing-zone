@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: fluent_bit
+  author: CzarIntel Platform Engineering
+  description: Installs Fluent Bit and ships journald, auditd and container logs to Loki
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+dependencies: []

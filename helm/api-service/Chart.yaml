@@ -1,0 +1,19 @@
+apiVersion: v2
+name: api-service
+description: CzarIntel reference API service — FastAPI workload with Prometheus metrics, HPA, PDB and hardened security context.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+kubeVersion: ">=1.27.0-0"
+keywords:
+  - czarintel
+  - fastapi
+  - devsecops
+home: https://github.com/czarintel/czarintel-landing-zone
+sources:
+  - https://github.com/czarintel/czarintel-landing-zone/tree/main/docker/api-service
+maintainers:
+  - name: Christian Gallon
+    email: christian@czarintel.io
+annotations:
+  artifacthub.io/license: MIT

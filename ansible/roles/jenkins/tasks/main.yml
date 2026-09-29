@@ -1,0 +1,21 @@
+---
+- name: Install Java runtime
+  ansible.builtin.package:
+    name: "{{ jenkins_java_package }}"
+    state: present
+
+- name: Create Jenkins service account
+  ansible.builtin.user:
+    name: "{{ jenkins_agent_user }}"
+    home: "{{ jenkins_agent_home }}"
+    shell: /bin/bash
+    system: true
+    create_home: true
+
+- name: Controller configuration
+  ansible.builtin.include_tasks: controller.yml
+  when: inventory_hostname in groups.get('jenkins_controllers', [])
+
+- name: Agent configuration
+  ansible.builtin.include_tasks: agent.yml
+  when: inventory_hostname in groups.get('jenkins_agents', [])

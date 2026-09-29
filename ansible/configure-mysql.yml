@@ -1,0 +1,25 @@
+---
+# Primary first, then replicas, then the ProxySQL tier in front of them.
+- name: Configure MySQL primary
+  hosts: mysql
+  serial: 1
+  order: sorted
+  roles:
+    - role: mysql
+      tags: [mysql]
+      when: mysql_role == 'primary'
+
+- name: Configure MySQL replicas
+  hosts: mysql
+  serial: 1
+  roles:
+    - role: mysql
+      tags: [mysql]
+      when: mysql_role == 'replica'
+
+- name: Configure ProxySQL
+  hosts: proxysql
+  serial: 1
+  roles:
+    - role: proxysql
+      tags: [proxysql]

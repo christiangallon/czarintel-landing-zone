@@ -1,0 +1,72 @@
+---
+- name: Create node_exporter system user
+  ansible.builtin.user:
+    name: "{{ node_exporter_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create textfile collector directory
+  ansible.builtin.file:
+    path: "{{ node_exporter_textfile_dir }}"
+    state: directory
+    owner: "{{ node_exporter_user }}"
+    group: "{{ node_exporter_user }}"
+    mode: "0755"
+
+- name: Check installed node_exporter version
+  ansible.builtin.command: "{{ node_exporter_bin }} --version"
+  register: node_exporter_installed
+  changed_when: false
+  failed_when: false
+
+- name: Download and install node_exporter
+  when: node_exporter_version not in (node_exporter_installed.stderr | default('') + node_exporter_installed.stdout | default(''))
+  block:
+    - name: Download release tarball (sha256 verified against upstream checksums)
+      ansible.builtin.get_url:
+        url: "{{ node_exporter_release_url }}/node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}.tar.gz"
+        dest: "/root/node_exporter-{{ node_exporter_version }}.tar.gz"
+        checksum: "sha256:{{ node_exporter_release_url }}/sha256sums.txt"
+        mode: "0600"
+
+    - name: Unpack tarball
+      ansible.builtin.unarchive:
+        src: "/root/node_exporter-{{ node_exporter_version }}.tar.gz"
+        dest: /root
+        remote_src: true
+
+    - name: Install binary
+      ansible.builtin.copy:
+        src: "/root/node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}/node_exporter"
+        dest: "{{ node_exporter_bin }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart node_exporter
+
+- name: Deploy systemd unit
+  ansible.builtin.template:
+    src: node_exporter.service.j2
+    dest: /etc/systemd/system/node_exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart node_exporter
+
+- name: Enable and start node_exporter
+  ansible.builtin.systemd:
+    name: node_exporter
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Verify metrics endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ node_exporter_listen.split(':') | last }}/metrics"
+    status_code: 200
+  register: node_exporter_probe
+  retries: 5
+  delay: 3
+  until: node_exporter_probe.status == 200

@@ -1,0 +1,7 @@
+---
+- name: Configure Jenkins controllers and agents
+  hosts: jenkins
+  serial: 1
+  roles:
+    - role: jenkins
+      tags: [jenkins]

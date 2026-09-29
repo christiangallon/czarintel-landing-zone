@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+[PARSER]
+    Name        auditd
+    Format      regex
+    Regex       ^type=(?<audit_type>[^ ]+) msg=audit\((?<audit_time>[0-9.]+):(?<audit_serial>[0-9]+)\): (?<audit_msg>.*)$
+    Time_Key    audit_time
+    Time_Format %s.%L
+
+[PARSER]
+    Name        cri
+    Format      regex
+    Regex       ^(?<time>[^ ]+) (?<stream>stdout|stderr) (?<logtag>[^ ]*) (?<log>.*)$
+    Time_Key    time
+    Time_Format %Y-%m-%dT%H:%M:%S.%L%z

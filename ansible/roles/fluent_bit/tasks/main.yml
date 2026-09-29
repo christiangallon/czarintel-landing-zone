@@ -1,0 +1,60 @@
+---
+- name: Ensure apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: ansible_os_family == 'Debian'
+- name: Add Fluent Bit signing key (Debian)
+  ansible.builtin.get_url:
+    url: https://packages.fluentbit.io/fluentbit.key
+    dest: /etc/apt/keyrings/fluentbit.asc
+    mode: "0644"
+  when: ansible_os_family == 'Debian'
+
+- name: Add Fluent Bit apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/fluentbit.asc] https://packages.fluentbit.io/ubuntu/{{ ansible_distribution_release }} {{ ansible_distribution_release }} main"
+    filename: fluent-bit
+    state: present
+  when: ansible_os_family == 'Debian'
+
+- name: Add Fluent Bit yum repository (RHEL)
+  ansible.builtin.yum_repository:
+    name: fluent-bit
+    description: Fluent Bit
+    baseurl: "https://packages.fluentbit.io/centos/$releasever/"
+    gpgcheck: true
+    gpgkey: https://packages.fluentbit.io/fluentbit.key
+  when: ansible_os_family == 'RedHat'
+
+- name: Install fluent-bit
+  ansible.builtin.package:
+    name: fluent-bit
+    state: present
+
+- name: Deploy fluent-bit configuration
+  ansible.builtin.template:
+    src: fluent-bit.conf.j2
+    dest: /etc/fluent-bit/fluent-bit.conf
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Restart fluent-bit
+
+- name: Deploy parsers
+  ansible.builtin.template:
+    src: parsers-czarintel.conf.j2
+    dest: /etc/fluent-bit/parsers-czarintel.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart fluent-bit
+
+- name: Enable and start fluent-bit
+  ansible.builtin.systemd:
+    name: fluent-bit
+    state: started
+    enabled: true

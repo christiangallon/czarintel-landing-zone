@@ -1,0 +1,71 @@
+---
+# CIS Benchmark (Ubuntu 22.04 / RHEL 9) - tunables
+cis_level: 1
+
+# 1.1.1 Disable unused filesystems
+cis_disabled_filesystems:
+  - cramfs
+  - freevxfs
+  - jffs2
+  - hfs
+  - hfsplus
+  - squashfs
+  - udf
+# 3.4 Uncommon network protocols
+cis_disabled_protocols:
+  - dccp
+  - sctp
+  - rds
+  - tipc
+cis_extra_kernel_modules_allowed: []
+
+# 1.1.2-1.1.5 /tmp mount options
+cis_tmp_mount_options: "defaults,rw,nosuid,nodev,noexec,relatime,size=2G"
+cis_manage_tmp_mount: true
+
+# 3.x Network parameters
+cis_ip_forward_allowed: false
+
+# 4.1 auditd
+cis_auditd_max_log_file: 100          # MB
+cis_auditd_num_logs: 10
+cis_auditd_space_left_action: email
+cis_auditd_admin_space_left_action: single
+cis_auditd_max_log_file_action: keep_logs
+cis_audit_immutable: true             # -e 2 (Level 2)
+
+# 5.2 SSH
+cis_ssh_port: 22
+cis_ssh_max_auth_tries: 4
+cis_ssh_client_alive_interval: 300
+cis_ssh_client_alive_count_max: 3
+cis_ssh_login_grace_time: 60
+cis_ssh_max_sessions: 10
+cis_ssh_ciphers: "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr"
+cis_ssh_macs: "hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256"
+cis_ssh_kex: "curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256"
+ssh_allowed_groups: []
+ssh_trusted_user_ca_keys: ""
+
+# 5.4 Password policy (local accounts - most auth is SSO/certs)
+cis_pass_max_days: 365
+cis_pass_min_days: 1
+cis_pass_warn_age: 7
+cis_umask: "027"
+cis_shell_timeout: 900
+
+# 2.x Services to remove
+cis_removed_packages:
+  - telnet
+  - rsh-client
+  - talk
+  - nis
+  - xinetd
+  - avahi-daemon
+  - cups
+cis_banner: |
+  ******************************************************************
+  * Authorised use only. This system is the property of CzarIntel.  *
+  * All activity is logged and monitored. Disconnect immediately if  *
+  * you are not an authorised user.                                  *
+  ******************************************************************

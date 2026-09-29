@@ -1,0 +1,44 @@
+# -----------------------------------------------------------------------------
+# Copy to terraform.tfvars (git-ignored) or <env>.tfvars and adjust.
+#   cp terraform.tfvars.example prod.tfvars
+#   terraform workspace select prod || terraform workspace new prod
+#   terraform plan -var-file=prod.tfvars -out=prod.plan
+# -----------------------------------------------------------------------------
+
+project     = "czarintel"
+environment = "prod"
+owner       = "christian.gallon"
+cost_center = "CZ-1000"
+
+enable_aws   = true
+enable_azure = true
+enable_gcp   = true
+
+# Restrict Kubernetes API access to your VPN / bastion egress IPs
+admin_cidr_blocks = ["203.0.113.10/32"]
+
+# ----------------------------- AWS -------------------------------------------
+aws_region                = "us-east-1"
+aws_vpc_cidr              = "10.10.0.0/16"
+aws_eks_version           = "1.30"
+aws_node_instance_types   = ["t3.medium"]
+aws_node_desired_size     = 3
+aws_node_min_size         = 2
+aws_node_max_size         = 6
+aws_rds_instance_class    = "db.t3.medium"
+aws_rds_allocated_storage = 50
+
+# ----------------------------- Azure -----------------------------------------
+azure_subscription_id        = "00000000-0000-0000-0000-000000000000"
+azure_tenant_id              = "00000000-0000-0000-0000-000000000000"
+azure_location               = "eastus2"
+azure_vnet_cidr              = "10.20.0.0/16"
+azure_aks_version            = "1.30"
+azure_admin_group_object_ids = ["11111111-1111-1111-1111-111111111111"]
+
+# ----------------------------- GCP -------------------------------------------
+gcp_project_id    = "czarintel-data-prod"
+gcp_region        = "us-central1"
+gcp_subnet_cidr   = "10.30.0.0/20"
+gcp_pods_cidr     = "10.31.0.0/16"
+gcp_services_cidr = "10.32.0.0/20"

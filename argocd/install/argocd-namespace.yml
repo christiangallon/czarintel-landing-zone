@@ -1,0 +1,122 @@
+# -----------------------------------------------------------------------------
+# ArgoCD installation baseline
+#   kubectl apply -f argocd/install/argocd-namespace.yml
+#   kubectl apply -n argocd --server-side -f \
+#     https://raw.githubusercontent.com/argoproj/argo-cd/v2.12.4/manifests/ha/install.yaml
+#   kubectl apply -f argocd/projects/ -f argocd/applications/
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    name: argocd
+    czarintel.io/environment: shared
+    czarintel.io/owner: platform-engineering
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+---
+# Core server settings — SSO via Entra ID, anonymous access disabled
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  url: https://argocd.czarintel.io
+  admin.enabled: "false"                 # local admin disabled after SSO bootstrap
+  users.anonymous.enabled: "false"
+  exec.enabled: "false"
+  timeout.reconciliation: 180s
+  statusbadge.enabled: "true"
+  application.resourceTrackingMethod: annotation
+  oidc.config: |
+    name: Entra ID
+    issuer: https://login.microsoftonline.com/$oidc.azure.tenantId/v2.0
+    clientID: $oidc.azure.clientId
+    clientSecret: $oidc.azure.clientSecret
+    requestedIDTokenClaims:
+      groups:
+        essential: true
+    requestedScopes: ["openid", "profile", "email"]
+  resource.exclusions: |
+    - apiGroups: ["cilium.io"]
+      kinds: ["CiliumIdentity"]
+      clusters: ["*"]
+---
+# Global RBAC — maps Entra ID group object IDs / names to ArgoCD roles
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-rbac-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  policy.default: role:readonly
+  scopes: "[groups, email]"
+  policy.csv: |
+    # Platform admins — full control
+    g, czarintel-platform-admins, role:admin
+
+    # SRE — sync/rollback any app, no project or cluster mutation
+    p, role:sre, applications, get,      */*, allow
+    p, role:sre, applications, sync,     */*, allow
+    p, role:sre, applications, action/*, */*, allow
+    p, role:sre, logs,         get,      */*, allow
+    g, czarintel-sre, role:sre
+
+    # Auditors — read only (default)
+    g, czarintel-auditors, role:readonly
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-cmd-params-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  server.insecure: "false"
+  controller.status.processors: "50"
+  controller.operation.processors: "25"
+  reposerver.parallelism.limit: "10"
+---
+# ArgoCD notifications → Slack on sync failure / degraded health
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+data:
+  service.slack: |
+    token: $slack-token
+  template.app-sync-failed: |
+    message: |
+      :x: Application *{{.app.metadata.name}}* sync FAILED at {{.app.status.operationState.finishedAt}}.
+      Revision: {{.app.status.sync.revision}}
+      {{.context.argocdUrl}}/applications/{{.app.metadata.name}}
+  template.app-health-degraded: |
+    message: |
+      :warning: Application *{{.app.metadata.name}}* is DEGRADED.
+      {{.context.argocdUrl}}/applications/{{.app.metadata.name}}
+  template.app-deployed: |
+    message: |
+      :rocket: *{{.app.metadata.name}}* deployed revision {{.app.status.sync.revision | trunc 7}} — healthy.
+  trigger.on-sync-failed: |
+    - when: app.status.operationState.phase in ['Error', 'Failed']
+      send: [app-sync-failed]
+  trigger.on-health-degraded: |
+    - when: app.status.health.status == 'Degraded'
+      send: [app-health-degraded]
+  trigger.on-deployed: |
+    - when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+      oncePer: app.status.sync.revision
+      send: [app-deployed]
+  context: |
+    argocdUrl: https://argocd.czarintel.io

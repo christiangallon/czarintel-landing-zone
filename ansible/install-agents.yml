@@ -1,0 +1,11 @@
+---
+# Prometheus node_exporter + Fluent Bit on every VM.
+# (K8s nodes get these as DaemonSets via kube-prometheus-stack instead.)
+- name: Install monitoring and logging agents
+  hosts: all:!k8s_nodes
+  serial: "50%"
+  roles:
+    - role: node_exporter
+      tags: [agents, node_exporter]
+    - role: fluent_bit
+      tags: [agents, fluent_bit]

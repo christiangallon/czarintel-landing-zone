@@ -1,0 +1,117 @@
+---
+- name: Fail fast if credentials were not injected
+  ansible.builtin.assert:
+    that:
+      - mysql_root_password | length >= 16
+      - mysql_replication_password | length >= 16
+      - mysql_monitor_password | length >= 16
+    fail_msg: >-
+      MYSQL_ROOT_PASSWORD, MYSQL_REPL_PASSWORD and PROXYSQL_MONITOR_PASSWORD must be exported
+      (>=16 chars) from Vault/Secrets Manager before running this role.
+  no_log: true
+
+- name: Install MySQL server and Python connector
+  ansible.builtin.package:
+    name:
+      - mysql-server
+      - "{{ 'python3-pymysql' if ansible_os_family == 'Debian' else 'python3-PyMySQL' }}"
+    state: present
+
+- name: Deploy my.cnf
+  ansible.builtin.template:
+    src: my.cnf.j2
+    dest: "{{ '/etc/mysql/mysql.conf.d/zz-czarintel.cnf' if ansible_os_family == 'Debian' else '/etc/my.cnf.d/zz-czarintel.cnf' }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart mysql
+
+- name: Enable and start MySQL
+  ansible.builtin.systemd:
+    name: "{{ 'mysql' if ansible_os_family == 'Debian' else 'mysqld' }}"
+    state: started
+    enabled: true
+
+- name: Flush handlers so config is live before user management
+  ansible.builtin.meta: flush_handlers
+
+- name: Set root password (socket auth on first run)
+  community.mysql.mysql_user:
+    name: root
+    host: localhost
+    password: "{{ mysql_root_password }}"
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    check_implicit_admin: true
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+    state: present
+  no_log: true
+
+- name: CIS MySQL 7.x | Remove anonymous users
+  community.mysql.mysql_user:
+    name: ""
+    host_all: true
+    state: absent
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+  no_log: true
+
+- name: CIS MySQL 4.1 | Remove test database
+  community.mysql.mysql_db:
+    name: test
+    state: absent
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+  no_log: true
+
+- name: Create replication user (TLS required)
+  community.mysql.mysql_user:
+    name: "{{ mysql_replication_user }}"
+    host: "{{ mysql_allowed_subnet }}"
+    password: "{{ mysql_replication_password }}"
+    priv: "*.*:REPLICATION SLAVE,REPLICATION CLIENT"
+    tls_requires:
+      SSL: ""
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+  no_log: true
+  when: mysql_role == 'primary'
+
+- name: Create ProxySQL monitor user
+  community.mysql.mysql_user:
+    name: "{{ mysql_monitor_user }}"
+    host: "{{ mysql_allowed_subnet }}"
+    password: "{{ mysql_monitor_password }}"
+    priv: "*.*:USAGE,REPLICATION CLIENT"
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+  no_log: true
+  when: mysql_role == 'primary'
+
+- name: Resolve the primary's address from inventory
+  ansible.builtin.set_fact:
+    mysql_primary_host: >-
+      {{ (groups['mysql'] | map('extract', hostvars)
+          | selectattr('mysql_role', 'equalto', 'primary') | first).ansible_host }}
+  when: mysql_role == 'replica'
+
+- name: Configure GTID replication on replicas
+  community.mysql.mysql_replication:
+    mode: changeprimary
+    primary_host: "{{ mysql_primary_host }}"
+    primary_user: "{{ mysql_replication_user }}"
+    primary_password: "{{ mysql_replication_password }}"
+    primary_auto_position: true
+    primary_ssl: true
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+  no_log: true
+  when: mysql_role == 'replica'
+
+- name: Start replica threads
+  community.mysql.mysql_replication:
+    mode: startreplica
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+  no_log: true
+  when: mysql_role == 'replica'

@@ -1,0 +1,13 @@
+---
+galaxy_info:
+  role_name: cis_hardening
+  author: CzarIntel Platform Engineering
+  description: CIS Benchmark Level 1/2 hardening for Ubuntu 22.04 and RHEL 9
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy, noble]
+    - name: EL
+      versions: ["9"]
+dependencies: []

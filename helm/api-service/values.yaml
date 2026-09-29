@@ -1,0 +1,126 @@
+# -----------------------------------------------------------------------------
+# api-service default values (environment files override these)
+# -----------------------------------------------------------------------------
+replicaCount: 2
+
+image:
+  repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/czarintel/api-service
+  # Overwritten by the Jenkins "Update GitOps Repo" stage with the git SHA
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Governance labels enforced by OPA Gatekeeper
+owner: platform-engineering
+costCenter: CZ-1000
+
+serviceAccount:
+  create: true
+  name: api-service
+  automountToken: false
+  # IRSA (EKS) / Workload Identity (AKS, GKE) annotations
+  annotations: {}
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  privileged: false
+  capabilities:
+    drop: ["ALL"]
+
+containerPort: 8000
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: api.local.czarintel.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+probes:
+  liveness:
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    path: /ready
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  startup:
+    path: /health
+    periodSeconds: 5
+    failureThreshold: 24
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Non-secret configuration → ConfigMap
+config:
+  APP_ENV: local
+  LOG_LEVEL: INFO
+  DB_PORT: "3306"
+  DB_HOST: ""
+
+# Secrets are NEVER stored in values. Reference an existing Secret populated by
+# External Secrets Operator / Secrets Store CSI (AWS Secrets Manager / Key Vault).
+existingSecret: ""
+
+metrics:
+  enabled: true
+  path: /metrics
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels:
+      release: kube-prometheus-stack
+
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+terminationGracePeriodSeconds: 30

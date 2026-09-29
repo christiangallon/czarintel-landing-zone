@@ -1,0 +1,377 @@
+// =============================================================================
+// CzarIntel api-service — Declarative CI pipeline (Jenkins on Kubernetes)
+//
+//   Checkout → Lint (flake8 ∥ hadolint) → Unit Tests → Docker Build →
+//   SAST/CVE scan (Trivy image ∥ Trivy fs/secrets) → Docker Push (ECR) →
+//   Helm Lint → Update GitOps repo (bump image tag) → Notify (Slack)
+//
+// Continuous DELIVERY is handled by ArgoCD watching the GitOps repo; Jenkins
+// never holds production cluster credentials (pull-based deployment).
+//
+// Required Jenkins credentials:
+//   aws-ecr-push        (AWS Credentials)   — IAM user/role limited to ECR push
+//   gitops-deploy-key   (SSH private key)   — write access to the GitOps repo
+//   slack-webhook-url   (Secret text)       — incoming webhook URL
+// =============================================================================
+
+pipeline {
+  agent {
+    kubernetes {
+      defaultContainer 'python'
+      yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app.kubernetes.io/name: jenkins-agent
+    czarintel.io/owner: platform-engineering
+    czarintel.io/cost-center: CZ-1000
+spec:
+  serviceAccountName: jenkins-agent
+  securityContext:
+    runAsUser: 1000
+    fsGroup: 1000
+  containers:
+    - name: python
+      image: python:3.12-slim-bookworm
+      command: ["sleep"]
+      args: ["infinity"]
+      resources:
+        requests: { cpu: 250m, memory: 512Mi }
+        limits:   { cpu: "1",  memory: 1Gi }
+    - name: hadolint
+      image: hadolint/hadolint:v2.12.0-debian
+      command: ["sleep"]
+      args: ["infinity"]
+    - name: helm
+      image: alpine/helm:3.16.2
+      command: ["sleep"]
+      args: ["infinity"]
+    - name: trivy
+      image: aquasec/trivy:0.56.2
+      command: ["sleep"]
+      args: ["infinity"]
+      volumeMounts:
+        - { name: trivy-cache, mountPath: /root/.cache/trivy }
+    - name: kaniko
+      image: gcr.io/kaniko-project/executor:v1.23.2-debug
+      command: ["sleep"]
+      args: ["infinity"]
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - { name: docker-config, mountPath: /kaniko/.docker }
+        - { name: image-out, mountPath: /workspace/image }
+    - name: crane
+      image: gcr.io/go-containerregistry/crane:debug
+      command: ["sleep"]
+      args: ["infinity"]
+    - name: tools
+      image: alpine/k8s:1.30.5   # aws-cli, yq, git, kubectl
+      command: ["sleep"]
+      args: ["infinity"]
+  volumes:
+    - { name: trivy-cache, emptyDir: {} }
+    - { name: docker-config, emptyDir: {} }
+    - { name: image-out, emptyDir: {} }
+'''
+    }
+  }
+
+  options {
+    timestamps()
+    ansiColor('xterm')
+    timeout(time: 45, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '30', artifactNumToKeepStr: '10'))
+    disableConcurrentBuilds(abortPrevious: true)
+    skipDefaultCheckout(true)
+  }
+
+  parameters {
+    choice(name: 'TARGET_ENV', choices: ['staging', 'production'], description: 'GitOps environment to promote the image to')
+    booleanParam(name: 'SKIP_SCAN_GATE', defaultValue: false, description: 'Break-glass: report CRITICAL CVEs without failing (requires approval)')
+  }
+
+  environment {
+    APP_NAME        = 'api-service'
+    APP_DIR         = 'docker/api-service'
+    CHART_DIR       = 'helm/api-service'
+    AWS_REGION      = 'us-east-1'
+    AWS_ACCOUNT_ID  = '123456789012'
+    ECR_REGISTRY    = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+    ECR_REPOSITORY  = 'czarintel/api-service'
+    GITOPS_REPO     = 'git@github.com:czarintel/czarintel-landing-zone.git'
+    GITOPS_BRANCH   = 'main'
+    TRIVY_SEVERITY  = 'CRITICAL,HIGH'
+    PIP_CACHE_DIR   = "${WORKSPACE}/.pip-cache"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+        script {
+          env.GIT_SHORT_SHA = sh(script: 'git rev-parse --short=12 HEAD', returnStdout: true).trim()
+          env.GIT_AUTHOR    = sh(script: "git log -1 --pretty=format:'%an'", returnStdout: true).trim()
+          env.GIT_MESSAGE   = sh(script: "git log -1 --pretty=format:'%s'", returnStdout: true).trim()
+          env.IMAGE_TAG     = "${env.BUILD_NUMBER}-${env.GIT_SHORT_SHA}"
+          env.IMAGE_URI     = "${env.ECR_REGISTRY}/${env.ECR_REPOSITORY}:${env.IMAGE_TAG}"
+          currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.GIT_SHORT_SHA}"
+          currentBuild.description = env.GIT_MESSAGE.take(80)
+        }
+      }
+    }
+
+    stage('Lint') {
+      parallel {
+        stage('flake8') {
+          steps {
+            container('python') {
+              sh '''
+                pip install --quiet flake8==7.1.1 flake8-bugbear==24.8.19
+                flake8 --max-line-length=120 --format=pylint --output-file=flake8.txt --tee \
+                  ${APP_DIR} python/
+              '''
+            }
+          }
+          post {
+            always {
+              recordIssues(enabledForFailure: true, tools: [flake8(pattern: 'flake8.txt')])
+            }
+          }
+        }
+        stage('hadolint') {
+          steps {
+            container('hadolint') {
+              sh '''
+                hadolint --failure-threshold warning --format tty ${APP_DIR}/Dockerfile
+                hadolint --failure-threshold warning --format tty docker/frontend/Dockerfile
+              '''
+            }
+          }
+        }
+      }
+    }
+
+    stage('Unit Tests') {
+      steps {
+        container('python') {
+          sh '''
+            python -m venv .venv
+            . .venv/bin/activate
+            pip install --quiet -r ${APP_DIR}/requirements.txt pytest==8.3.3 pytest-cov==5.0.0 httpx==0.27.2
+            pytest ${APP_DIR}/tests \
+              --junitxml=reports/junit.xml \
+              --cov=${APP_DIR} --cov-report=xml:reports/coverage.xml --cov-fail-under=80 -q
+          '''
+        }
+      }
+      post {
+        always {
+          junit allowEmptyResults: false, testResults: 'reports/junit.xml'
+          recordCoverage(tools: [[parser: 'COBERTURA', pattern: 'reports/coverage.xml']])
+        }
+      }
+    }
+
+    stage('Docker Build') {
+      steps {
+        container('kaniko') {
+          // Build to a tarball first so the image is scanned BEFORE it is pushed
+          sh '''
+            /kaniko/executor \
+              --context=${WORKSPACE}/${APP_DIR} \
+              --dockerfile=${WORKSPACE}/${APP_DIR}/Dockerfile \
+              --build-arg APP_VERSION=${IMAGE_TAG} \
+              --build-arg GIT_COMMIT=${GIT_SHORT_SHA} \
+              --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+              --destination=${IMAGE_URI} \
+              --no-push \
+              --tar-path=/workspace/image/image.tar \
+              --snapshot-mode=redo \
+              --reproducible
+            cp /workspace/image/image.tar ${WORKSPACE}/image.tar
+          '''
+        }
+      }
+    }
+
+    stage('SAST & CVE Scan') {
+      parallel {
+        stage('Trivy image') {
+          steps {
+            container('trivy') {
+              script {
+                def exitCode = params.SKIP_SCAN_GATE ? '0' : '1'
+                sh """
+                  trivy image --input image.tar \
+                    --severity ${TRIVY_SEVERITY} --ignore-unfixed \
+                    --format table --exit-code 0
+                  trivy image --input image.tar \
+                    --format sarif --output trivy-image.sarif --exit-code 0
+                  trivy image --input image.tar \
+                    --severity CRITICAL --ignore-unfixed --exit-code ${exitCode} --quiet
+                """
+              }
+            }
+          }
+        }
+        stage('Trivy fs + secrets') {
+          steps {
+            container('trivy') {
+              sh '''
+                trivy fs --scanners vuln,secret,misconfig \
+                  --severity ${TRIVY_SEVERITY} --exit-code 1 \
+                  --skip-dirs .venv --skip-dirs .pip-cache \
+                  ${APP_DIR} ${CHART_DIR} kubernetes/
+              '''
+            }
+          }
+        }
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: 'trivy-image.sarif', allowEmptyArchive: true
+        }
+      }
+    }
+
+    stage('Docker Push (ECR)') {
+      when {
+        anyOf { branch 'main'; branch pattern: 'release/.*', comparator: 'REGEXP' }
+      }
+      steps {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-ecr-push',
+                          accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+          container('tools') {
+            // Short-lived (12h) ECR token, written to the ephemeral workspace only
+            sh '''
+              set +x
+              umask 077
+              aws ecr get-login-password --region ${AWS_REGION} > .ecr-token
+            '''
+          }
+        }
+        container('crane') {
+          sh '''
+            set +x
+            crane auth login ${ECR_REGISTRY} -u AWS --password-stdin < .ecr-token
+            rm -f .ecr-token
+            set -x
+            crane push image.tar ${IMAGE_URI}
+            crane digest ${IMAGE_URI} > image.digest
+            echo "Pushed ${IMAGE_URI}@$(cat image.digest)"
+          '''
+        }
+        script {
+          env.IMAGE_DIGEST = readFile('image.digest').trim()
+        }
+      }
+    }
+
+    stage('Helm Lint') {
+      steps {
+        container('helm') {
+          // Lint + render with the exact tag that will be promoted
+          sh '''
+            helm lint ${CHART_DIR} -f ${CHART_DIR}/values-staging.yaml --strict
+            helm lint ${CHART_DIR} -f ${CHART_DIR}/values-production.yaml --strict
+            helm lint helm/mysql --strict
+            helm template ${APP_NAME} ${CHART_DIR} \
+              -f ${CHART_DIR}/values-${TARGET_ENV}.yaml \
+              --set image.tag=${IMAGE_TAG} > rendered-${TARGET_ENV}.yaml
+            grep -qF -- ":${IMAGE_TAG}" rendered-${TARGET_ENV}.yaml \
+              || { echo "Rendered manifest does not reference ${IMAGE_TAG}"; exit 1; }
+          '''
+        }
+      }
+    }
+
+    stage('Update GitOps Repo') {
+      when {
+        anyOf { branch 'main'; branch pattern: 'release/.*', comparator: 'REGEXP' }
+      }
+      steps {
+        container('tools') {
+          sshagent(credentials: ['gitops-deploy-key']) {
+            sh '''
+              set -eu
+              mkdir -p ~/.ssh && ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+              rm -rf gitops && git clone --depth 1 --branch ${GITOPS_BRANCH} ${GITOPS_REPO} gitops
+              cd gitops
+
+              VALUES_FILE="${CHART_DIR}/values-${TARGET_ENV}.yaml"
+              yq -i ".image.tag = \\"${IMAGE_TAG}\\"" "${VALUES_FILE}"
+              yq -i ".image.repository = \\"${ECR_REGISTRY}/${ECR_REPOSITORY}\\"" "${VALUES_FILE}"
+
+              if git diff --quiet; then
+                echo "Image tag already at ${IMAGE_TAG}; nothing to commit."
+                exit 0
+              fi
+
+              git config user.name  "czarintel-jenkins"
+              git config user.email "jenkins@czarintel.io"
+              git add "${VALUES_FILE}"
+              git commit -m "deploy(${APP_NAME}): ${TARGET_ENV} -> ${IMAGE_TAG}" \
+                         -m "Source: ${GIT_SHORT_SHA} by ${GIT_AUTHOR}" \
+                         -m "Digest: ${IMAGE_DIGEST}" \
+                         -m "Build: ${BUILD_URL}"
+
+              # Retry on non-fast-forward (concurrent pipelines bumping other apps)
+              for i in 1 2 3; do
+                git pull --rebase origin ${GITOPS_BRANCH} && git push origin HEAD:${GITOPS_BRANCH} && break
+                echo "push attempt $i failed; retrying" && sleep $((i * 5))
+              done
+            '''
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      script { notifySlack('good', ':white_check_mark: *SUCCESS*') }
+    }
+    unstable {
+      script { notifySlack('warning', ':warning: *UNSTABLE*') }
+    }
+    failure {
+      script { notifySlack('danger', ':x: *FAILED*') }
+    }
+    always {
+      archiveArtifacts artifacts: 'reports/**, flake8.txt', allowEmptyArchive: true
+      cleanWs(deleteDirs: true, disableDeferredWipeout: true)
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Slack notification via incoming webhook (no Slack plugin dependency)
+// -----------------------------------------------------------------------------
+def notifySlack(String color, String status) {
+  def payload = groovy.json.JsonOutput.toJson([
+    attachments: [[
+      color : color,
+      title : "${env.JOB_NAME} #${env.BUILD_NUMBER}",
+      title_link: env.BUILD_URL,
+      text  : "${status} — `${env.APP_NAME}` → *${params.TARGET_ENV}*",
+      fields: [
+        [title: 'Commit',  value: "${env.GIT_SHORT_SHA ?: 'n/a'} — ${env.GIT_MESSAGE ?: ''}", short: false],
+        [title: 'Author',  value: env.GIT_AUTHOR ?: 'n/a', short: true],
+        [title: 'Image',   value: env.IMAGE_TAG ?: 'n/a', short: true],
+        [title: 'Duration', value: currentBuild.durationString.replace(' and counting', ''), short: true],
+      ],
+      footer: 'CzarIntel CI',
+      ts    : (long) (System.currentTimeMillis() / 1000),
+    ]]
+  ])
+  writeFile file: 'slack-payload.json', text: payload
+  withCredentials([string(credentialsId: 'slack-webhook-url', variable: 'SLACK_WEBHOOK')]) {
+    sh '''
+      set +x
+      curl -fsS -X POST -H 'Content-Type: application/json' \
+        --data @slack-payload.json "$SLACK_WEBHOOK" || echo "Slack notification failed (non-fatal)"
+    '''
+  }
+}

@@ -1,0 +1,94 @@
+# -----------------------------------------------------------------------------
+# MySQL chart values
+# -----------------------------------------------------------------------------
+image:
+  repository: docker.io/library/mysql
+  tag: "8.0.39"
+  pullPolicy: IfNotPresent
+
+exporter:
+  enabled: true
+  image:
+    repository: quay.io/prometheus/mysqld-exporter
+    tag: "v0.15.1"
+  port: 9104
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+owner: data-platform
+costCenter: CZ-1000
+environment: staging
+
+auth:
+  database: czarintel
+  username: czapp
+  # Leave empty to auto-generate random passwords on first install.
+  # Generated values are preserved across upgrades via `lookup`.
+  rootPassword: ""
+  password: ""
+  exporterPassword: ""
+  # Use a Secret managed outside Helm (External Secrets / Sealed Secrets)
+  existingSecret: ""
+
+service:
+  port: 3306
+
+persistence:
+  enabled: true
+  storageClass: ""
+  accessModes: ["ReadWriteOnce"]
+  size: 20Gi
+  # Separate PVC for logical backups written by the backup CronJob / tooling
+  backup:
+    enabled: true
+    size: 20Gi
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# Tuned for a 1Gi container limit
+config: |
+  [mysqld]
+  bind-address                  = 0.0.0.0
+  default_authentication_plugin = caching_sha2_password
+  character-set-server          = utf8mb4
+  collation-server              = utf8mb4_0900_ai_ci
+  innodb_buffer_pool_size       = 512M
+  innodb_log_file_size          = 128M
+  innodb_flush_log_at_trx_commit = 1
+  sync_binlog                   = 1
+  max_connections               = 200
+  local_infile                  = OFF
+  skip_name_resolve             = ON
+  log_bin                       = mysql-bin
+  binlog_expire_logs_seconds    = 604800
+  slow_query_log                = ON
+  long_query_time               = 1
+  require_secure_transport      = OFF
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  runAsGroup: 999
+  fsGroup: 999
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,10 @@
+---
+jenkins_java_package: openjdk-17-jre-headless
+jenkins_agent_user: jenkins
+jenkins_agent_home: /var/lib/jenkins
+jenkins_controller_url: "https://jenkins.czarintel.io"
+# Agents run builds in Docker; the daemon is hardened by configure-docker.yml
+docker_users:
+  - jenkins
+# Jenkins agents need outbound build traffic but no IPv4 forwarding beyond Docker
+cis_ip_forward_allowed: true

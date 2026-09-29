@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: jenkins
+  author: CzarIntel Platform Engineering
+  description: Configures Jenkins controllers (LTS) and build agents with the DevSecOps toolchain
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+dependencies: []

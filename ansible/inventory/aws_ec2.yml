@@ -1,0 +1,23 @@
+---
+# Dynamic inventory for AWS. Authenticates with the caller's OIDC/SSO session
+# (no static keys). Instances are grouped by the `czarintel:role` tag that the
+# Terraform module applies.
+plugin: amazon.aws.aws_ec2
+regions:
+  - us-east-1
+filters:
+  instance-state-name: running
+  "tag:Project": czarintel
+hostnames:
+  - private-ip-address
+compose:
+  ansible_host: private_ip_address
+  cloud: "'aws'"
+keyed_groups:
+  - key: tags['czarintel:role']
+    separator: ""
+  - key: placement.availability_zone
+    prefix: az
+groups:
+  docker_hosts: "tags.get('czarintel:role') == 'jenkins_agents'"
+  jenkins: "tags.get('czarintel:role', '').startswith('jenkins')"

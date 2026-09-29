@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: node_exporter
+  author: CzarIntel Platform Engineering
+  description: Installs Prometheus node_exporter with checksum verification and systemd sandboxing
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+dependencies: []

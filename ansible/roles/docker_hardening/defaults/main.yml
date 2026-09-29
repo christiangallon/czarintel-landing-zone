@@ -1,0 +1,14 @@
+---
+# CIS Docker Benchmark v1.6 aligned daemon settings
+docker_users: []
+docker_apt_arch: "{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"
+docker_log_max_size: "50m"
+docker_log_max_file: "5"
+docker_default_ulimit_nofile: "65536:65536"
+docker_userns_remap: "default"
+docker_live_restore: true
+docker_icc: false
+docker_no_new_privileges: true
+docker_seccomp_profile: ""
+docker_registry_mirrors: []
+docker_insecure_registries: []   # CIS 2.4 - must stay empty

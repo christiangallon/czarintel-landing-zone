@@ -1,0 +1,43 @@
+---
+- name: 4.1.1.1 | Install auditd
+  ansible.builtin.package:
+    name: "{{ 'auditd' if ansible_os_family == 'Debian' else 'audit' }}"
+    state: present
+
+- name: 4.1.2 | Configure auditd retention
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: "^{{ item.key }}\\s*="
+    line: "{{ item.key }} = {{ item.value }}"
+  loop:
+    - { key: max_log_file, value: "{{ cis_auditd_max_log_file }}" }
+    - { key: num_logs, value: "{{ cis_auditd_num_logs }}" }
+    - { key: max_log_file_action, value: "{{ cis_auditd_max_log_file_action }}" }
+    - { key: space_left_action, value: "{{ cis_auditd_space_left_action }}" }
+    - { key: action_mail_acct, value: root }
+    - { key: admin_space_left_action, value: "{{ cis_auditd_admin_space_left_action }}" }
+  notify: Restart auditd
+
+- name: 4.1.3 - 4.1.17 | Deploy CIS audit rules
+  ansible.builtin.template:
+    src: audit.rules.j2
+    dest: /etc/audit/rules.d/50-cis-czarintel.rules
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Restart auditd
+
+- name: 4.1.1.3 | Enable auditing for processes that start before auditd (grub)
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX="(?!.*audit=1)(.*)"$'
+    line: 'GRUB_CMDLINE_LINUX="\1 audit=1 audit_backlog_limit=8192"'
+    backrefs: true
+  when: cis_level | int >= 2
+  notify: Regenerate grub config
+
+- name: 4.1.1.2 | Enable and start auditd
+  ansible.builtin.service:
+    name: auditd
+    state: started
+    enabled: true

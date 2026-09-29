@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CzarIntel | Landing Zone Health Dashboard</title>
+  <style>
+    :root {
+      --bg: #0b1020; --panel: #121a33; --border: #22305a; --text: #e6ebff;
+      --muted: #8b97c7; --accent: #c9a227; --ok: #2ecc71; --warn: #f1c40f; --down: #e74c3c;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+    header { display: flex; justify-content: space-between; align-items: center; padding: 20px 32px; border-bottom: 1px solid var(--border); }
+    .brand { font-size: 1.35rem; font-weight: 700; letter-spacing: .5px; }
+    .brand span { color: var(--accent); }
+    .meta { color: var(--muted); font-size: .85rem; text-align: right; }
+    main { padding: 28px 32px; max-width: 1200px; margin: 0 auto; }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+    .card h3 { margin: 0 0 6px; font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+    .card .value { font-size: 2rem; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: .92rem; }
+    th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: .75rem; letter-spacing: 1px; }
+    .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .75rem; font-weight: 700; }
+    .healthy { background: rgba(46,204,113,.15); color: var(--ok); }
+    .degraded { background: rgba(241,196,15,.15); color: var(--warn); }
+    .down { background: rgba(231,76,60,.15); color: var(--down); }
+    .cloud { font-weight: 700; text-transform: uppercase; font-size: .75rem; }
+    .aws { color: #ff9900; } .azure { color: #3a96dd; } .gcp { color: #34a853; }
+    #error { display: none; margin-bottom: 20px; padding: 14px; border-radius: 8px; background: rgba(231,76,60,.12); border: 1px solid var(--down); }
+    footer { text-align: center; color: var(--muted); font-size: .8rem; padding: 24px; }
+    @media (max-width: 800px) { .summary { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">CZAR<span>INTEL</span> &middot; Landing Zone Health</div>
+    <div class="meta">
+      <div>API: <strong id="api-status">checking&hellip;</strong> &middot; v<span id="api-version">&ndash;</span></div>
+      <div>Last refresh: <span id="refreshed">&ndash;</span></div>
+    </div>
+  </header>
+
+  <main>
+    <div id="error"></div>
+
+    <section class="summary">
+      <div class="card"><h3>Total services</h3><div class="value" id="total">&ndash;</div></div>
+      <div class="card"><h3>Healthy</h3><div class="value" style="color:var(--ok)" id="healthy">&ndash;</div></div>
+      <div class="card"><h3>Degraded</h3><div class="value" style="color:var(--warn)" id="degraded">&ndash;</div></div>
+      <div class="card"><h3>Down</h3><div class="value" style="color:var(--down)" id="down">&ndash;</div></div>
+    </section>
+
+    <table aria-label="Platform services">
+      <thead>
+        <tr><th>Service</th><th>Cloud</th><th>Cluster / Namespace</th><th>Version</th><th>Replicas</th><th>Status</th></tr>
+      </thead>
+      <tbody id="services"><tr><td colspan="6">Loading&hellip;</td></tr></tbody>
+    </table>
+  </main>
+
+  <footer>CzarIntel Enterprise Multi-Cloud DevSecOps Landing Zone &middot; AWS &middot; Azure &middot; GCP</footer>
+
+  <script>
+    "use strict";
+    // Nginx reverse-proxies /api/ and /health to the api-service ClusterIP.
+    const REFRESH_MS = 15000;
+
+    // Build DOM nodes explicitly (no innerHTML with API data → no XSS sink).
+    function cell(text, className) {
+      const td = document.createElement("td");
+      if (className) {
+        const span = document.createElement("span");
+        span.className = className;
+        span.textContent = text;
+        td.appendChild(span);
+      } else {
+        td.textContent = text;
+      }
+      return td;
+    }
+
+    function showError(message) {
+      const el = document.getElementById("error");
+      el.textContent = message;
+      el.style.display = message ? "block" : "none";
+    }
+
+    async function fetchJson(url) {
+      const res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+      if (!res.ok) throw new Error(`${url} returned HTTP ${res.status}`);
+      return res.json();
+    }
+
+    async function refresh() {
+      try {
+        const [health, data] = await Promise.all([fetchJson("/health"), fetchJson("/api/v1/services")]);
+        document.getElementById("api-status").textContent = health.status.toUpperCase();
+        document.getElementById("api-status").style.color = "var(--ok)";
+        document.getElementById("api-version").textContent = health.version;
+
+        for (const key of ["healthy", "degraded", "down"]) {
+          document.getElementById(key).textContent = data[key];
+        }
+        document.getElementById("total").textContent = data.count;
+
+        const tbody = document.getElementById("services");
+        tbody.replaceChildren();
+        for (const s of data.services) {
+          const tr = document.createElement("tr");
+          tr.append(
+            cell(s.name),
+            cell(s.cloud, `cloud ${s.cloud}`),
+            cell(`${s.cluster} / ${s.namespace}`),
+            cell(s.version),
+            cell(String(s.replicas)),
+            cell(s.status, `pill ${s.status}`)
+          );
+          tbody.appendChild(tr);
+        }
+        showError("");
+      } catch (err) {
+        document.getElementById("api-status").textContent = "UNREACHABLE";
+        document.getElementById("api-status").style.color = "var(--down)";
+        showError(`Unable to reach api-service: ${err.message}`);
+      } finally {
+        document.getElementById("refreshed").textContent = new Date().toLocaleTimeString();
+      }
+    }
+
+    refresh();
+    setInterval(refresh, REFRESH_MS);
+  </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+---
+fluent_bit_output_host: loki-gateway.monitoring.svc.cluster.local
+fluent_bit_output_port: 3100
+fluent_bit_output_tls: true
+fluent_bit_http_port: 2020
+fluent_bit_extra_inputs: []
+fluent_bit_labels:
+  org: "{{ org_name | default('czarintel') }}"
+  env: "{{ environment_name | default('production') }}"

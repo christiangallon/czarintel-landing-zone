@@ -1,0 +1,13 @@
+---
+proxysql_version: "2.6.3"
+proxysql_admin_user: admin
+proxysql_admin_password: "{{ lookup('env', 'PROXYSQL_ADMIN_PASSWORD') }}"
+proxysql_mysql_port: 6033
+proxysql_admin_port: 6032
+proxysql_monitor_user: proxysql_monitor
+proxysql_monitor_password: "{{ lookup('env', 'PROXYSQL_MONITOR_PASSWORD') }}"
+proxysql_app_user: app
+proxysql_app_password: "{{ lookup('env', 'MYSQL_APP_PASSWORD') }}"
+proxysql_writer_hostgroup: 10
+proxysql_reader_hostgroup: 20
+proxysql_backends: "{{ groups['mysql'] | default([]) }}"

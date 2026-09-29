@@ -1,0 +1,54 @@
+# -----------------------------------------------------------------------------
+# In-cluster MySQL for staging (production uses RDS Multi-AZ via Terraform).
+# Automated prune is DISABLED for stateful data — deletions require a human.
+# -----------------------------------------------------------------------------
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mysql-staging
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: mysql
+    czarintel.io/environment: staging
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: czarintel-deploys
+    notifications.argoproj.io/subscribe.on-health-degraded.slack: czarintel-deploys
+spec:
+  project: czarintel
+  source:
+    repoURL: https://github.com/czarintel/czarintel-landing-zone.git
+    targetRevision: main
+    path: helm/mysql
+    helm:
+      releaseName: mysql
+      valueFiles:
+        - values.yaml
+      parameters:
+        - name: environment
+          value: staging
+        - name: auth.existingSecret
+          value: mysql-credentials      # synced from Key Vault by External Secrets
+        - name: persistence.size
+          value: 50Gi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: staging
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 20s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.status

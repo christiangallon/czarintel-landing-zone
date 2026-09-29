@@ -1,0 +1,14 @@
+---
+proxysql_version: "2.6.3"
+proxysql_admin_user: admin
+proxysql_admin_password: ""
+proxysql_mysql_port: 6033
+proxysql_admin_port: 6032
+proxysql_monitor_user: proxysql_monitor
+proxysql_monitor_password: ""
+proxysql_app_user: app
+proxysql_app_password: ""
+proxysql_writer_hostgroup: 10
+proxysql_reader_hostgroup: 20
+proxysql_max_connections: 2048
+proxysql_backends: []

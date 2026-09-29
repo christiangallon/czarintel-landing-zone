@@ -1,0 +1,66 @@
+# {{ ansible_managed }}
+[SERVICE]
+    Flush         5
+    Daemon        Off
+    Log_Level     info
+    Parsers_File  parsers.conf
+    Parsers_File  parsers-czarintel.conf
+    HTTP_Server   On
+    HTTP_Listen   127.0.0.1
+    HTTP_Port     {{ fluent_bit_http_port }}
+    storage.path  /var/lib/fluent-bit/buffer
+    storage.sync  normal
+    storage.backlog.mem_limit 50M
+
+[INPUT]
+    Name            systemd
+    Tag             host.journal
+    Read_From_Tail  On
+    DB              /var/lib/fluent-bit/journal.db
+    storage.type    filesystem
+
+[INPUT]
+    Name            tail
+    Tag             host.audit
+    Path            /var/log/audit/audit.log
+    Parser          auditd
+    DB              /var/lib/fluent-bit/audit.db
+    storage.type    filesystem
+
+[INPUT]
+    Name            tail
+    Tag             host.sudo
+    Path            /var/log/sudo.log
+    DB              /var/lib/fluent-bit/sudo.db
+{% for i in fluent_bit_extra_inputs %}
+
+[INPUT]
+    Name            {{ i.name }}
+    Tag             {{ i.tag }}
+    Path            {{ i.path }}
+{% if i.parser is defined %}
+    Parser          {{ i.parser }}
+{% endif %}
+    DB              /var/lib/fluent-bit/{{ i.tag | regex_replace('[^a-z0-9]', '') }}.db
+    storage.type    filesystem
+{% endfor %}
+
+[FILTER]
+    Name    record_modifier
+    Match   *
+    Record  hostname ${HOSTNAME}
+{% for k, v in fluent_bit_labels.items() %}
+    Record  {{ k }} {{ v }}
+{% endfor %}
+
+[OUTPUT]
+    Name         loki
+    Match        *
+    Host         {{ fluent_bit_output_host }}
+    Port         {{ fluent_bit_output_port }}
+    tls          {{ 'On' if fluent_bit_output_tls | bool else 'Off' }}
+    tls.verify   On
+    labels       job=fluent-bit, host=${HOSTNAME}{% for k, v in fluent_bit_labels.items() %}, {{ k }}={{ v }}{% endfor %}
+
+    line_format  json
+    Retry_Limit  False

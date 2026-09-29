@@ -1,0 +1,78 @@
+# -----------------------------------------------------------------------------
+# AppProject — the security boundary for all CzarIntel workloads.
+#   * Only the landing-zone repo may be deployed from
+#   * Only production / staging / monitoring namespaces are valid targets
+#   * Cluster-scoped resources are denied except Namespaces
+#   * Production syncs blocked Fri 18:00 → Mon 06:00 (change freeze)
+# -----------------------------------------------------------------------------
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: czarintel
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: CzarIntel Enterprise Landing Zone workloads
+  sourceRepos:
+    - https://github.com/czarintel/czarintel-landing-zone.git
+    - git@github.com:czarintel/czarintel-landing-zone.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: production
+    - server: https://kubernetes.default.svc
+      namespace: staging
+    - server: https://kubernetes.default.svc
+      namespace: monitoring
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+    - group: networking.k8s.io
+      kind: NetworkPolicy        # owned by the platform team, not app teams
+  namespaceResourceWhitelist:
+    - { group: "", kind: ConfigMap }
+    - { group: "", kind: Secret }
+    - { group: "", kind: Service }
+    - { group: "", kind: ServiceAccount }
+    - { group: "", kind: PersistentVolumeClaim }
+    - { group: apps, kind: Deployment }
+    - { group: apps, kind: StatefulSet }
+    - { group: autoscaling, kind: HorizontalPodAutoscaler }
+    - { group: policy, kind: PodDisruptionBudget }
+    - { group: networking.k8s.io, kind: Ingress }
+    - { group: monitoring.coreos.com, kind: ServiceMonitor }
+    - { group: monitoring.coreos.com, kind: PrometheusRule }
+  orphanedResources:
+    warn: true
+  syncWindows:
+    - kind: deny
+      schedule: "0 18 * * 5"
+      duration: 60h
+      applications: ["*-production"]
+      manualSync: true          # break-glass manual syncs remain possible
+      timeZone: America/New_York
+  roles:
+    - name: developer
+      description: Developers can view and sync staging apps only
+      policies:
+        - p, proj:czarintel:developer, applications, get,  czarintel/*, allow
+        - p, proj:czarintel:developer, applications, sync, czarintel/*-staging, allow
+      groups:
+        - czarintel-developers
+    - name: release-manager
+      description: Promote and roll back production
+      policies:
+        - p, proj:czarintel:release-manager, applications, get,      czarintel/*, allow
+        - p, proj:czarintel:release-manager, applications, sync,     czarintel/*, allow
+        - p, proj:czarintel:release-manager, applications, action/*, czarintel/*, allow
+      groups:
+        - czarintel-release-managers
+    - name: ci
+      description: Read-only token used by Jenkins to wait for rollout health
+      policies:
+        - p, proj:czarintel:ci, applications, get, czarintel/*, allow

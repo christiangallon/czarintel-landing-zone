@@ -1,0 +1,50 @@
+---
+# CIS Level 1/2 baseline for every managed host.
+# K8s nodes are drained/cordoned one at a time so workloads keep running.
+- name: Harden Jenkins, MySQL and ProxySQL hosts
+  hosts: all:!k8s_nodes
+  serial: "30%"
+  max_fail_percentage: 0
+  roles:
+    - role: cis_hardening
+      tags: [harden]
+
+- name: Harden Kubernetes worker nodes (rolling, one node at a time)
+  hosts: k8s_nodes
+  serial: 1
+  max_fail_percentage: 0
+  vars:
+    kubectl_delegate: "{{ groups['jenkins_agents'] | default(['localhost']) | first }}"
+  pre_tasks:
+    - name: Cordon and drain node
+      ansible.builtin.command: >-
+        kubectl drain {{ ansible_nodename }} --ignore-daemonsets
+        --delete-emptydir-data --timeout=300s
+      delegate_to: "{{ kubectl_delegate }}"
+      become: false
+      changed_when: true
+      when: not ansible_check_mode
+      tags: [harden]
+  roles:
+    - role: cis_hardening
+      tags: [harden]
+  post_tasks:
+    - name: Flush handlers (sshd/sysctl/auditd) before returning node to service
+      ansible.builtin.meta: flush_handlers
+
+    - name: Uncordon node
+      ansible.builtin.command: kubectl uncordon {{ ansible_nodename }}
+      delegate_to: "{{ kubectl_delegate }}"
+      become: false
+      changed_when: true
+      when: not ansible_check_mode
+      tags: [harden]
+
+    - name: Wait for node Ready
+      ansible.builtin.command: >-
+        kubectl wait --for=condition=Ready node/{{ ansible_nodename }} --timeout=300s
+      delegate_to: "{{ kubectl_delegate }}"
+      become: false
+      changed_when: false
+      when: not ansible_check_mode
+      tags: [harden]

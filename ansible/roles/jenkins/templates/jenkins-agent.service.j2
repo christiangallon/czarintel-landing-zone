@@ -1,0 +1,25 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Jenkins inbound agent ({{ inventory_hostname }})
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User={{ jenkins_agent_user }}
+WorkingDirectory={{ jenkins_agent_home }}/agent
+# Secret is read from a root-owned env file written by the secrets bootstrap
+EnvironmentFile=-/etc/jenkins-agent.env
+ExecStartPre=/usr/bin/curl -fsSLo {{ jenkins_agent_home }}/agent/agent.jar {{ jenkins_controller_url }}/jnlpJars/agent.jar
+ExecStart=/usr/bin/java -jar {{ jenkins_agent_home }}/agent/agent.jar \
+    -url {{ jenkins_controller_url }} \
+    -name {{ inventory_hostname }} \
+    -secret ${JENKINS_AGENT_SECRET} \
+    -workDir {{ jenkins_agent_home }}/agent \
+    -webSocket
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

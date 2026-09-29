@@ -1,0 +1,14 @@
+---
+mysql_version: "8.0"
+mysql_port: 3306
+mysql_bind_address: "0.0.0.0"
+mysql_datadir: /var/lib/mysql
+mysql_innodb_buffer_pool_size: "{{ (ansible_memtotal_mb * 0.7) | int }}M"
+mysql_max_connections: 500
+mysql_require_secure_transport: true
+# Credentials are pulled from Vault / Secrets Manager at runtime - never committed.
+mysql_root_password: "{{ lookup('env', 'MYSQL_ROOT_PASSWORD') }}"
+mysql_replication_user: repl
+mysql_replication_password: "{{ lookup('env', 'MYSQL_REPL_PASSWORD') }}"
+mysql_monitor_user: proxysql_monitor
+mysql_monitor_password: "{{ lookup('env', 'PROXYSQL_MONITOR_PASSWORD') }}"

@@ -1,0 +1,39 @@
+---
+# -----------------------------------------------------------------------------
+# CzarIntel Landing Zone - master playbook
+# Order matters: harden the OS first, then install agents, then layer services.
+#   ansible-playbook site.yml                       # everything
+#   ansible-playbook site.yml --limit k8s_nodes     # one tier
+#   ansible-playbook site.yml --check --diff        # drift detection (CI nightly)
+# -----------------------------------------------------------------------------
+- name: Pre-flight checks
+  hosts: all
+  gather_facts: true
+  tags: [always]
+  tasks:
+    - name: Assert minimum supported OS versions
+      ansible.builtin.assert:
+        that: >-
+          (ansible_distribution == 'Ubuntu' and ansible_distribution_version is version('22.04', '>='))
+          or (ansible_os_family == 'RedHat' and ansible_distribution_major_version | int >= 9)
+        fail_msg: "{{ inventory_hostname }}: unsupported OS {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+    - name: Assert enough free disk on /
+      ansible.builtin.assert:
+        that: (ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first) > 2147483648
+        fail_msg: "Less than 2 GiB free on / - aborting before package installs"
+
+- name: CIS hardening
+  ansible.builtin.import_playbook: harden.yml
+
+- name: Observability agents
+  ansible.builtin.import_playbook: install-agents.yml
+
+- name: Docker daemon hardening
+  ansible.builtin.import_playbook: configure-docker.yml
+
+- name: Jenkins platform
+  ansible.builtin.import_playbook: configure-jenkins.yml
+
+- name: MySQL + ProxySQL middleware
+  ansible.builtin.import_playbook: configure-mysql.yml

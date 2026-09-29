@@ -1,0 +1,22 @@
+---
+- name: Restart sshd
+  ansible.builtin.service:
+    name: "{{ 'ssh' if ansible_os_family == 'Debian' else 'sshd' }}"
+    state: restarted
+
+- name: Reload sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: true
+
+- name: Restart auditd
+  # auditd refuses 'systemctl restart'; use the SysV service wrapper
+  ansible.builtin.command: service auditd restart  # noqa: command-instead-of-module
+  changed_when: true
+
+- name: Regenerate grub config
+  ansible.builtin.command: "{{ 'update-grub' if ansible_os_family == 'Debian' else 'grub2-mkconfig -o /boot/grub2/grub.cfg' }}"
+  changed_when: true
+
+- name: Remount tmp
+  ansible.builtin.command: mount -o remount /tmp  # noqa: command-instead-of-module
+  changed_when: true

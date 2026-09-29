@@ -1,0 +1,49 @@
+# {{ ansible_managed }}
+# CIS 5.2 hardened sshd configuration - CzarIntel Landing Zone
+Port {{ cis_ssh_port }}
+AddressFamily inet
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_rsa_key
+
+SyslogFacility AUTHPRIV
+LogLevel VERBOSE
+
+# --- Authentication ---
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication no
+PermitEmptyPasswords no
+KbdInteractiveAuthentication no
+HostbasedAuthentication no
+IgnoreRhosts yes
+UsePAM yes
+MaxAuthTries {{ cis_ssh_max_auth_tries }}
+MaxSessions {{ cis_ssh_max_sessions }}
+MaxStartups 10:30:60
+LoginGraceTime {{ cis_ssh_login_grace_time }}
+{% if ssh_trusted_user_ca_keys | length > 0 %}
+# Short-lived certificates signed by the Vault SSH CA (Zero Trust - no static keys)
+TrustedUserCAKeys {{ ssh_trusted_user_ca_keys }}
+{% endif %}
+{% if ssh_allowed_groups | length > 0 %}
+AllowGroups {{ ssh_allowed_groups | join(' ') }}
+{% endif %}
+
+# --- Session ---
+ClientAliveInterval {{ cis_ssh_client_alive_interval }}
+ClientAliveCountMax {{ cis_ssh_client_alive_count_max }}
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+PermitTunnel no
+PermitUserEnvironment no
+GatewayPorts no
+Banner /etc/issue.net
+PrintMotd no
+
+# --- Crypto ---
+Ciphers {{ cis_ssh_ciphers }}
+MACs {{ cis_ssh_macs }}
+KexAlgorithms {{ cis_ssh_kex }}
+
+Subsystem sftp {{ '/usr/lib/openssh/sftp-server' if ansible_os_family == 'Debian' else '/usr/libexec/openssh/sftp-server' }} -f AUTHPRIV -l INFO

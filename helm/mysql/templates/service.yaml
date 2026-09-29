@@ -1,0 +1,42 @@
+# Headless service — stable DNS for StatefulSet pods (mysql-0.mysql-headless)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mysql.fullname" . }}-headless
+  labels:
+    {{- include "mysql.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: mysql
+      port: {{ .Values.service.port }}
+      targetPort: mysql
+  selector:
+    {{- include "mysql.selectorLabels" . | nindent 4 }}
+---
+# Client-facing service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mysql.fullname" . }}
+  labels:
+    {{- include "mysql.labels" . | nindent 4 }}
+  {{- if .Values.exporter.enabled }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: {{ .Values.exporter.port | quote }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: mysql
+      port: {{ .Values.service.port }}
+      targetPort: mysql
+    {{- if .Values.exporter.enabled }}
+    - name: metrics
+      port: {{ .Values.exporter.port }}
+      targetPort: metrics
+    {{- end }}
+  selector:
+    {{- include "mysql.selectorLabels" . | nindent 4 }}

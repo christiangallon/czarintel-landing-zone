@@ -1,0 +1,65 @@
+# ---------------- Terraform ----------------
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.plan
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# ---------------- Secrets ------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+kubeconfig*
+*.kubeconfig
+secrets.yaml
+secrets.yml
+.vault_pass*
+
+# ---------------- Python -------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------------- Helm ---------------------
+helm/**/charts/*.tgz
+helm/**/Chart.lock
+
+# ---------------- Ansible ------------------
+*.retry
+ansible/.facts_cache/
+ansible/collections/
+
+# ---------------- Reports ------------------
+reports/
+*.csv
+compliance-report*.json
+
+# ---------------- OS / IDE -----------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

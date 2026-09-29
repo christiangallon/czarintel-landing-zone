@@ -1,0 +1,62 @@
+# {{ ansible_managed }}
+# CzarIntel MySQL {{ mysql_version }} - {{ mysql_role }} (server-id {{ mysql_server_id }})
+[mysqld]
+# --- Network ---
+port                        = {{ mysql_port }}
+bind-address                = {{ mysql_bind_address }}
+skip-name-resolve           = ON
+max_connections             = {{ mysql_max_connections }}
+max_connect_errors          = 1000
+local_infile                = OFF
+require_secure_transport    = {{ 'ON' if mysql_require_secure_transport | bool else 'OFF' }}
+tls_version                 = TLSv1.2,TLSv1.3
+
+# --- Storage / InnoDB ---
+datadir                     = {{ mysql_datadir }}
+default_storage_engine      = InnoDB
+innodb_buffer_pool_size     = {{ mysql_innodb_buffer_pool_size }}
+innodb_buffer_pool_instances = 8
+innodb_log_file_size        = 1G
+innodb_flush_log_at_trx_commit = 1
+innodb_flush_method         = O_DIRECT
+innodb_file_per_table       = ON
+innodb_redo_log_encrypt     = ON
+innodb_undo_log_encrypt     = ON
+default_table_encryption    = OFF
+
+# --- Replication (GTID) ---
+server_id                   = {{ mysql_server_id }}
+log_bin                     = mysql-bin
+binlog_format               = ROW
+binlog_row_image            = FULL
+binlog_expire_logs_seconds  = {{ mysql_binlog_expire_seconds }}
+sync_binlog                 = 1
+gtid_mode                   = ON
+enforce_gtid_consistency    = ON
+log_replica_updates         = ON
+{% if mysql_role == 'replica' %}
+read_only                   = ON
+super_read_only             = ON
+relay_log                   = relay-bin
+relay_log_recovery          = ON
+{% endif %}
+
+# --- Security (CIS MySQL 8.0 benchmark) ---
+sql_mode                    = STRICT_ALL_TABLES,NO_ENGINE_SUBSTITUTION,ERROR_FOR_DIVISION_BY_ZERO
+symbolic-links              = 0
+secure_file_priv            = /var/lib/mysql-files
+default_password_lifetime   = 90
+password_history            = 5
+password_reuse_interval     = 365
+
+# --- Logging / audit ---
+log_error                   = /var/log/mysql/error.log
+log_error_verbosity         = 2
+slow_query_log              = ON
+slow_query_log_file         = /var/log/mysql/slow.log
+long_query_time             = {{ mysql_slow_query_time }}
+log_queries_not_using_indexes = OFF
+
+# --- Character set ---
+character_set_server        = utf8mb4
+collation_server            = utf8mb4_0900_ai_ci

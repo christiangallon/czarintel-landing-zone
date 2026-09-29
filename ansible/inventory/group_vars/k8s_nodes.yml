@@ -5,8 +5,6 @@ cis_extra_kernel_modules_allowed:
   - overlay
   - br_netfilter
 # Container runtime on managed node groups is containerd - skip Docker role.
-fluent_bit_extra_inputs:
-  - name: tail
-    path: /var/log/containers/*.log
-    tag: kube.*
-    parser: cri
+# install-agents.yml excludes k8s_nodes: node metrics and all node/pod logs are
+# collected by DaemonSets (kube-prometheus-stack node-exporter and
+# monitoring/fluent-bit), so no host agents are installed here.

@@ -100,7 +100,7 @@ Each cloud is behind its own feature flag (`enable_aws`, `enable_azure`, `enable
 | `argocd/` | AppProject plus Applications (GitOps) | [tools/argocd.md](../tools/argocd.md) |
 | `ci-cd/` | Jenkinsfile and Jenkins-on-Kubernetes manifests | [tools/jenkins.md](../tools/jenkins.md) |
 | `.github/workflows/` | IaC and platform quality gates | [tools/jenkins.md#github-actions-quality-gates](../tools/jenkins.md#github-actions-quality-gates) |
-| `monitoring/` | kube-prometheus-stack, alert rules, Loki, Grafana dashboards-as-code | [tools/observability.md](../tools/observability.md) |
+| `monitoring/` | kube-prometheus-stack, alert rules, Loki, Fluent Bit, Grafana dashboards-as-code | [tools/observability.md](../tools/observability.md) |
 | `ansible/` | CIS hardening, agents, Docker, Jenkins, MySQL/ProxySQL on VMs | [tools/ansible.md](../tools/ansible.md), [tools/mysql.md](../tools/mysql.md) |
 | `scripts/` | Bootstrap, compliance scanner, cost report, health check | [tools/automation-scripts.md](../tools/automation-scripts.md) |
 | `docs/` | This documentation | — |

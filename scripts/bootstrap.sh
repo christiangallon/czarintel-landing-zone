@@ -19,6 +19,7 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 LOCK_TABLE="${LOCK_TABLE:-czarintel-terraform-locks}"
 KPS_CHART_VERSION="${KPS_CHART_VERSION:-65.1.1}"
 LOKI_CHART_VERSION="${LOKI_CHART_VERSION:-6.16.0}"
+FLUENT_BIT_CHART_VERSION="${FLUENT_BIT_CHART_VERSION:-0.47.10}"
 GATEKEEPER_VERSION="${GATEKEEPER_VERSION:-3.17.1}"
 ARGOCD_VERSION="${ARGOCD_VERSION:-v2.12.6}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -166,6 +167,11 @@ cluster() {
   run helm repo add grafana https://grafana.github.io/helm-charts --force-update
   run helm upgrade --install loki grafana/loki -n monitoring \
     --version "$LOKI_CHART_VERSION" -f monitoring/loki/values-override.yml --wait --timeout 10m
+
+  log "Fluent Bit $FLUENT_BIT_CHART_VERSION (node log shipper -> Loki)"
+  run helm repo add fluent https://fluent.github.io/helm-charts --force-update
+  run helm upgrade --install fluent-bit fluent/fluent-bit -n monitoring \
+    --version "$FLUENT_BIT_CHART_VERSION" -f monitoring/fluent-bit/values-override.yml --wait --timeout 5m
 
   log "ArgoCD $ARGOCD_VERSION (GitOps takes over application delivery from here)"
   run kubectl apply -f argocd/install/argocd-namespace.yml

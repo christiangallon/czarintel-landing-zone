@@ -22,7 +22,7 @@ to a CIS Level 1/2 baseline, then layers observability agents and middleware.
 |------|-----------|----------|
 | `cis_hardening` | modprobe blacklist, `/tmp` + `/dev/shm` noexec, sysctl, auditd rules (immutable at L2), sshd (`PermitRootLogin no`, cert-only auth), login.defs, sudo logging | NIST CM-6, CM-7, AC-17, AU-2, AU-12 · PCI 2.2, 10.2 · HIPAA 164.312(b) |
 | `node_exporter` | checksum-verified install, sandboxed systemd unit, post-install probe | NIST SI-4 · SOC2 CC7.2 |
-| `fluent_bit` | journald + auditd + sudo + container logs, filesystem buffering, TLS to Loki | NIST AU-6, AU-9 · PCI 10.5 |
+| `fluent_bit` | journald + auditd + sudo (+ per-group extra inputs), filesystem buffering, mTLS to Loki. Pod logs are shipped by the in-cluster DaemonSet (`monitoring/fluent-bit`) | NIST AU-6, AU-9 · PCI 10.5 |
 | `docker_hardening` | userns-remap, no-new-privileges, icc off, live-restore, log rotation, asserted post-apply | CIS Docker 2.x · NIST CM-7 |
 | `jenkins` | LTS controller bound to localhost behind ingress, agents via WebSocket (no inbound ports) | NIST SA-11, CM-3 |
 | `mysql` | TLS-only transport, GTID replication, redo/undo encryption, password policy, test DB/anon removal | PCI 8.x · HIPAA 164.312(a)(2)(iv) |

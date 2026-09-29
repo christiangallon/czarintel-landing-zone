@@ -1,0 +1,208 @@
+# =============================================================================
+# CzarIntel: Fluent Bit (in-cluster log shipper) values for fluent/fluent-bit 0.47.10
+#
+#   helm repo add fluent https://fluent.github.io/helm-charts
+#   helm upgrade --install fluent-bit fluent/fluent-bit --version 0.47.10 \
+#     -n monitoring -f monitoring/fluent-bit/values-override.yml
+#
+# DaemonSet on every node: tails container logs plus node journal (kubelet,
+# containerd, sshd) and auditd, enriches them with Kubernetes
+# metadata, parses the api-service JSON log lines, and pushes to the Loki
+# gateway inside the monitoring namespace (allowed by allow-intra-namespace).
+# VMs ship to the same Loki through the mTLS ingress (ansible/roles/fluent_bit).
+#
+# Security: reads host logs through read-only hostPath mounts. The monitoring
+# namespace is PSA "privileged" for exactly this class of agent (node-exporter,
+# log shippers). The container still runs with a read-only root FS, no
+# privilege escalation and all capabilities dropped. It runs as root only
+# because /var/log/pods is root-owned on EKS/AKS/GKE nodes.
+# =============================================================================
+
+kind: DaemonSet
+
+image:
+  repository: cr.fluentbit.io/fluent/fluent-bit
+  pullPolicy: IfNotPresent
+
+podLabels:
+  czarintel.io/owner: platform-engineering
+  czarintel.io/environment: shared
+
+priorityClassName: system-node-critical
+
+tolerations:
+  - operator: Exists          # run on every node, including tainted system pools
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  runAsUser: 0
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+rbac:
+  create: true
+  nodeAccess: false
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  selector:
+    release: kps             # matched by kube-prometheus-stack (fullnameOverride kps)
+
+# Offsets DB and filesystem buffer survive restarts without writing to the root FS
+daemonSetVolumes:
+  - name: varlog
+    hostPath:
+      path: /var/log
+  - name: fluent-bit-state
+    hostPath:
+      path: /var/lib/fluent-bit
+      type: DirectoryOrCreate
+daemonSetVolumeMounts:
+  - name: varlog
+    mountPath: /var/log
+    readOnly: true
+  - name: fluent-bit-state
+    mountPath: /var/lib/fluent-bit
+
+config:
+  service: |
+    [SERVICE]
+        Daemon                    Off
+        Flush                     5
+        Log_Level                 info
+        Parsers_File              /fluent-bit/etc/parsers.conf
+        Parsers_File              /fluent-bit/etc/conf/custom_parsers.conf
+        HTTP_Server               On
+        HTTP_Listen               0.0.0.0
+        HTTP_Port                 {{ .Values.metricsPort }}
+        Health_Check              On
+        storage.path              /var/lib/fluent-bit/buffer
+        storage.sync              normal
+        storage.backlog.mem_limit 16M
+
+  inputs: |
+    [INPUT]
+        Name              tail
+        Tag               kube.*
+        Path              /var/log/containers/*.log
+        Exclude_Path      /var/log/containers/fluent-bit-*.log
+        multiline.parser  cri, docker
+        DB                /var/lib/fluent-bit/tail-containers.db
+        Mem_Buf_Limit     32MB
+        Skip_Long_Lines   On
+        Refresh_Interval  10
+        storage.type      filesystem
+
+    # Node-level logs (EKS/AKS/GKE nodes are excluded from the Ansible agent play)
+    [INPUT]
+        Name              systemd
+        Tag               host.systemd
+        Systemd_Filter    _SYSTEMD_UNIT=kubelet.service
+        Systemd_Filter    _SYSTEMD_UNIT=containerd.service
+        Systemd_Filter    _SYSTEMD_UNIT=sshd.service
+        Path              /var/log/journal
+        DB                /var/lib/fluent-bit/systemd.db
+        Read_From_Tail    On
+        storage.type      filesystem
+
+    [INPUT]
+        Name              tail
+        Tag               host.audit
+        Path              /var/log/audit/audit.log
+        DB                /var/lib/fluent-bit/tail-audit.db
+        Mem_Buf_Limit     16MB
+        Skip_Long_Lines   On
+        storage.type      filesystem
+
+  filters: |
+    [FILTER]
+        Name                kubernetes
+        Match               kube.*
+        Merge_Log           On
+        Keep_Log            Off
+        K8S-Logging.Parser  On
+        K8S-Logging.Exclude On
+        Labels              Off
+        Annotations         Off
+
+    # Drop health-probe noise from the api-service access log
+    [FILTER]
+        Name     grep
+        Match    kube.*
+        Exclude  path ^/(health|ready|metrics)$
+
+    # Tag node-level records with their origin (used as a Loki label)
+    [FILTER]
+        Name    modify
+        Match   host.systemd
+        Add     log_source journal
+
+    [FILTER]
+        Name    modify
+        Match   host.audit
+        Add     log_source auditd
+
+  outputs: |
+    [OUTPUT]
+        Name                     loki
+        Match                    kube.*
+        Host                     loki-gateway.monitoring.svc.cluster.local
+        Port                     80
+        Labels                   job=fluent-bit, cluster=${CLUSTER_NAME}
+        Label_Map_Path           /fluent-bit/etc/conf/loki-labelmap.json
+        Line_Format              json
+        Auto_Kubernetes_Labels   Off
+        Retry_Limit              10
+        storage.total_limit_size 1G
+
+    [OUTPUT]
+        Name                     loki
+        Match                    host.*
+        Host                     loki-gateway.monitoring.svc.cluster.local
+        Port                     80
+        Labels                   job=fluent-bit-node, cluster=${CLUSTER_NAME}, node=${NODE_NAME}, source=$log_source
+        Line_Format              json
+        Retry_Limit              10
+        storage.total_limit_size 512M
+
+  # api-service pods may opt in with the annotation fluentbit.io/parser: czarintel_json
+  # to use the application's own ISO-8601 "ts" field as the record timestamp.
+  customParsers: |
+    [PARSER]
+        Name        czarintel_json
+        Format      json
+        Time_Key    ts
+        Time_Format %Y-%m-%dT%H:%M:%S.%L%z
+        Time_Keep   On
+
+  extraFiles:
+    loki-labelmap.json: |
+      {
+        "kubernetes": {
+          "namespace_name": "namespace",
+          "container_name": "container",
+          "pod_name": "pod"
+        },
+        "level": "level"
+      }
+
+env:
+  - name: NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+  - name: CLUSTER_NAME
+    value: czarintel-prod-eks   # ${project}-${environment}-eks from terraform/modules/aws

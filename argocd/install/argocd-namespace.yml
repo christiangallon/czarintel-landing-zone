@@ -2,7 +2,7 @@
 # ArgoCD installation baseline
 #   kubectl apply -f argocd/install/argocd-namespace.yml
 #   kubectl apply -n argocd --server-side -f \
-#     https://raw.githubusercontent.com/argoproj/argo-cd/v2.12.4/manifests/ha/install.yaml
+#     https://raw.githubusercontent.com/argoproj/argo-cd/v2.12.6/manifests/ha/install.yaml
 #   kubectl apply -f argocd/projects/ -f argocd/applications/
 # -----------------------------------------------------------------------------
 apiVersion: v1

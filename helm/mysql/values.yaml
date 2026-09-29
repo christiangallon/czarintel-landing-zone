@@ -43,10 +43,30 @@ persistence:
   storageClass: ""
   accessModes: ["ReadWriteOnce"]
   size: 20Gi
-  # Separate PVC for logical backups written by the backup CronJob / tooling
+  # Separate PVC for logical backups written by the backup CronJob below
   backup:
     enabled: true
     size: 20Gi
+
+# Nightly logical backup: consistent single-transaction dump (GTID-aware),
+# gzip-compressed and sha256-summed onto the backup PVC, pruned after
+# retentionDays. Pod label app.kubernetes.io/name=mysql-backup is what the
+# staging NetworkPolicies (kubernetes/network-policies) allow to reach MySQL.
+backup:
+  enabled: true
+  schedule: "30 2 * * *"          # 02:30 in timeZone
+  timeZone: "America/New_York"
+  retentionDays: 7
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  activeDeadlineSeconds: 3600
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 resources:
   requests:

@@ -1,0 +1,81 @@
+{{- if and .Values.backup.enabled .Values.persistence.enabled .Values.persistence.backup.enabled }}
+# Nightly logical backup to the dedicated backup PVC.
+#   Restore: see docs/runbooks/disaster-recovery.md (section "In-cluster MySQL").
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "mysql.fullname" . }}-backup
+  labels:
+    {{- include "mysql.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  timeZone: {{ .Values.backup.timeZone | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.backup.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.backup.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: {{ .Values.backup.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: mysql-backup
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/part-of: czarintel-landing-zone
+            czarintel.io/owner: {{ .Values.owner | quote }}
+            czarintel.io/cost-center: {{ .Values.costCenter | quote }}
+            czarintel.io/environment: {{ .Values.environment | quote }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: mysqldump
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+                readOnlyRootFilesystem: true
+              env:
+                - name: MYSQL_HOST
+                  value: {{ include "mysql.fullname" . }}
+                - name: MYSQL_PORT
+                  value: {{ .Values.service.port | quote }}
+                - name: RETENTION_DAYS
+                  value: {{ .Values.backup.retentionDays | quote }}
+                - name: MYSQL_PWD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "mysql.secretName" . }}
+                      key: mysql-root-password
+              command: ["/bin/bash", "-ceu"]
+              args:
+                - |
+                  set -o pipefail
+                  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+                  out="/backup/mysql-${stamp}.sql.gz"
+                  echo "[czarintel-backup] dumping ${MYSQL_HOST}:${MYSQL_PORT} -> ${out}"
+                  mysqldump --host="${MYSQL_HOST}" --port="${MYSQL_PORT}" --user=root \
+                    --all-databases --single-transaction --quick --routines --events --triggers \
+                    --set-gtid-purged=ON --source-data=2 \
+                    | gzip -6 > "${out}.partial"
+                  mv "${out}.partial" "${out}"
+                  (cd /backup && sha256sum "$(basename "${out}")" > "$(basename "${out}").sha256")
+                  find /backup -maxdepth 1 -name 'mysql-*.sql.gz*' -mtime +"${RETENTION_DAYS}" -print -delete
+                  echo "[czarintel-backup] done: $(du -h "${out}" | cut -f1)"
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: {{ include "mysql.fullname" . }}-backup
+            - name: tmp
+              emptyDir: {}
+{{- end }}

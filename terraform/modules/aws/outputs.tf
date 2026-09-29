@@ -79,3 +79,11 @@ output "security_alerts_topic_arn" {
 output "jenkins_agent_irsa_role_arn" {
   value = aws_iam_role.jenkins_agent.arn
 }
+
+output "cloudtrail_arn" {
+  value = aws_cloudtrail.main.arn
+}
+
+output "audit_bucket_name" {
+  value = aws_s3_bucket.audit.id
+}

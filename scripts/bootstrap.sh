@@ -18,6 +18,7 @@ PROJECT="${PROJECT:-czarintel}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 LOCK_TABLE="${LOCK_TABLE:-czarintel-terraform-locks}"
 KPS_CHART_VERSION="${KPS_CHART_VERSION:-65.1.1}"
+LOKI_CHART_VERSION="${LOKI_CHART_VERSION:-6.16.0}"
 GATEKEEPER_VERSION="${GATEKEEPER_VERSION:-3.17.1}"
 ARGOCD_VERSION="${ARGOCD_VERSION:-v2.12.6}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -141,7 +142,17 @@ cluster() {
   run helm repo add gatekeeper https://open-policy-agent.github.io/gatekeeper/charts --force-update
   run helm upgrade --install gatekeeper gatekeeper/gatekeeper -n gatekeeper-system --create-namespace \
     --version "$GATEKEEPER_VERSION" --wait
-  run kubectl apply -f kubernetes/opa-gatekeeper/require-labels.yml
+  # Constraints reference CRDs that Gatekeeper generates asynchronously from the
+  # ConstraintTemplates, so the first apply can race; retry until established.
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if run kubectl apply -f kubernetes/opa-gatekeeper/require-labels.yml; then
+      break
+    fi
+    [[ "$attempt" -lt 5 ]] || die "Gatekeeper constraints failed to apply"
+    log "waiting for constraint CRDs (attempt $attempt/5)"
+    sleep 10
+  done
 
   log "kube-prometheus-stack $KPS_CHART_VERSION + dashboards"
   run helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
@@ -150,6 +161,11 @@ cluster() {
     -f monitoring/prometheus/values-override.yml --wait --timeout 10m
   run kubectl apply -f monitoring/prometheus/custom-rules/
   run kubectl apply -k monitoring/grafana
+
+  log "Loki $LOKI_CHART_VERSION (log aggregation backend for Grafana)"
+  run helm repo add grafana https://grafana.github.io/helm-charts --force-update
+  run helm upgrade --install loki grafana/loki -n monitoring \
+    --version "$LOKI_CHART_VERSION" -f monitoring/loki/values-override.yml --wait --timeout 10m
 
   log "ArgoCD $ARGOCD_VERSION (GitOps takes over application delivery from here)"
   run kubectl apply -f argocd/install/argocd-namespace.yml

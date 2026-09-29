@@ -35,6 +35,32 @@
     name: fluent-bit
     state: present
 
+- name: Create mTLS certificate directory
+  ansible.builtin.file:
+    path: "{{ fluent_bit_tls_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: fluent_bit_tls_local_dir | length > 0
+
+- name: Install mTLS client certificate, key and CA
+  ansible.builtin.copy:
+    src: "{{ fluent_bit_tls_local_dir }}/{{ item.name }}"
+    dest: "{{ fluent_bit_tls_dir }}/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { name: ca.crt, mode: "0644" }
+    - { name: client.crt, mode: "0644" }
+    - { name: client.key, mode: "0600" }
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: "{{ item.name == 'client.key' }}"
+  when: fluent_bit_tls_local_dir | length > 0
+  notify: Restart fluent-bit
+
 - name: Deploy fluent-bit configuration
   ansible.builtin.template:
     src: fluent-bit.conf.j2

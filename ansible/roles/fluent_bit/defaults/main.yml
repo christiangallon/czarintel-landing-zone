@@ -1,9 +1,18 @@
 ---
-fluent_bit_output_host: loki-gateway.monitoring.svc.cluster.local
-fluent_bit_output_port: 3100
+# Loki push endpoint. VMs outside the cluster reach Loki through the mTLS
+# ingress defined in monitoring/loki/values-override.yml (gateway.ingress).
+fluent_bit_output_host: loki.czarintel.io
+fluent_bit_output_port: 443
 fluent_bit_output_tls: true
 fluent_bit_http_port: 2020
 fluent_bit_extra_inputs: []
 fluent_bit_labels:
   org: "{{ org_name | default('czarintel') }}"
   env: "{{ environment_name | default('production') }}"
+
+# Mutual TLS: the Loki ingress rejects clients without a certificate signed by
+# the CzarIntel logging CA. Point fluent_bit_tls_local_dir at a directory on
+# the Ansible controller containing ca.crt, client.crt and client.key
+# (issued per host, e.g. by cert-manager or Vault PKI). Empty = no client cert.
+fluent_bit_tls_local_dir: ""
+fluent_bit_tls_dir: /etc/fluent-bit/tls

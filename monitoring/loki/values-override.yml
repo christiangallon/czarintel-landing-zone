@@ -5,10 +5,10 @@
 #   helm upgrade --install loki grafana/loki --version 6.16.0 \
 #     -n monitoring -f monitoring/loki/values-override.yml
 #
-# Topology: SingleBinary + gateway. Fluent Bit (DaemonSet on EKS, systemd
-# service on VMs via ansible/roles/fluent_bit) pushes to
-# http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push, which is
-# the exact URL Grafana's `loki` datasource uses (monitoring/prometheus).
+# Topology: SingleBinary + gateway. Grafana's `loki` datasource and in-cluster
+# shippers use http://loki-gateway.monitoring.svc.cluster.local. VMs (Fluent Bit
+# installed by ansible/roles/fluent_bit) push over mTLS to
+# https://loki.czarintel.io/loki/api/v1/push (gateway.ingress below).
 #
 # Retention: 90 days hot (HIPAA 164.312(b) audit controls, PCI 10.7 requires
 # 3 months immediately available). Long-term (1y+) archive lives in the
@@ -90,6 +90,28 @@ gateway:
   resources:
     requests: { cpu: 50m,  memory: 64Mi }
     limits:   { cpu: 250m, memory: 256Mi }
+  # External push endpoint for VMs (Fluent Bit via ansible/roles/fluent_bit).
+  # Zero Trust: TLS + mandatory client certificate (mTLS) + private CIDRs only.
+  # In-cluster shippers keep using http://loki-gateway.monitoring.svc.cluster.local.
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8"
+      nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+      nginx.ingress.kubernetes.io/auth-tls-secret: monitoring/czarintel-logging-ca
+      nginx.ingress.kubernetes.io/auth-tls-verify-depth: "2"
+      nginx.ingress.kubernetes.io/proxy-body-size: 16m
+    hosts:
+      - host: loki.czarintel.io
+        paths:
+          - path: /loki/api/v1/push
+            pathType: Prefix
+    tls:
+      - secretName: loki-czarintel-io-tls
+        hosts:
+          - loki.czarintel.io
 
 # Scalable-mode targets disabled in SingleBinary mode
 backend:

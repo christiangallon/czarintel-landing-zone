@@ -60,6 +60,11 @@
     Port         {{ fluent_bit_output_port }}
     tls          {{ 'On' if fluent_bit_output_tls | bool else 'Off' }}
     tls.verify   On
+{% if fluent_bit_tls_local_dir | length > 0 %}
+    tls.ca_file  {{ fluent_bit_tls_dir }}/ca.crt
+    tls.crt_file {{ fluent_bit_tls_dir }}/client.crt
+    tls.key_file {{ fluent_bit_tls_dir }}/client.key
+{% endif %}
     labels       job=fluent-bit, host=${HOSTNAME}{% for k, v in fluent_bit_labels.items() %}, {{ k }}={{ v }}{% endfor %}
 
     line_format  json

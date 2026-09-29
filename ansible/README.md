@@ -38,6 +38,7 @@ ansible-galaxy collection install -r requirements.yml -p ./collections
 # Secrets come from Vault / AWS Secrets Manager — never from the repo
 export MYSQL_ROOT_PASSWORD=$(aws secretsmanager get-secret-value --secret-id czarintel/mysql/root --query SecretString --output text)
 export MYSQL_REPL_PASSWORD=...  PROXYSQL_MONITOR_PASSWORD=...  PROXYSQL_ADMIN_PASSWORD=...  MYSQL_APP_PASSWORD=...
+export FLUENT_BIT_TLS_DIR=$HOME/.czarintel/logging-mtls   # ca.crt, client.crt, client.key for the Loki mTLS ingress
 
 ansible-playbook site.yml --check --diff          # drift report, no changes
 ansible-playbook site.yml                          # converge everything

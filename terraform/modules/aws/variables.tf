@@ -134,3 +134,9 @@ variable "jenkins_agent_service_account" {
   type        = string
   default     = "jenkins-agent"
 }
+
+variable "audit_log_retention_days" {
+  description = "CloudTrail log retention in S3 (days). HIPAA requires 6 years of policy/audit documentation."
+  type        = number
+  default     = 2190
+}

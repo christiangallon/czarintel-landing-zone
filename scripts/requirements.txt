@@ -1,0 +1,5 @@
+boto3>=1.34
+PyYAML>=6.0
+# test-only
+pytest>=8.0
+moto[cloudtrail,ec2,guardduty,iam,s3]>=5.0

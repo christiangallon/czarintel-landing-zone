@@ -1,0 +1,39 @@
+---
+# Production synthetic checks - consumed by scripts/health_check.py
+# (Jenkins post-deploy stage and on-call runbook).
+http:
+  - name: api-liveness
+    url: https://api.czarintel.io/health
+    expect_status: 200
+    expect_json: {status: ok}
+    max_latency_ms: 500
+  - name: api-readiness
+    url: https://api.czarintel.io/ready
+    expect_status: 200
+    max_latency_ms: 800
+  - name: api-services-inventory
+    url: https://api.czarintel.io/api/v1/services
+    expect_status: 200
+    max_latency_ms: 500
+  - name: frontend
+    url: https://app.czarintel.io/
+    expect_status: 200
+    expect_text: CzarIntel
+  - name: grafana
+    url: https://grafana.czarintel.io/api/health
+    expect_status: 200
+    expect_json: {database: ok}
+  - name: argocd
+    url: https://argocd.czarintel.io/healthz
+    expect_status: 200
+  - name: jenkins
+    url: https://jenkins.czarintel.io/login
+    expect_status: 200
+tcp:
+  - name: proxysql
+    host: proxysql.czarintel.internal
+    port: 6033
+prometheus:
+  url: http://kps-prometheus.monitoring.svc.cluster.local:9090
+  fail_on_severity: critical
+  ignore_alerts: [Watchdog, InfoInhibitor]

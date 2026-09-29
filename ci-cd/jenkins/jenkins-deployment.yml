@@ -185,9 +185,14 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits:   { cpu: "1", memory: 1Gi }
           volumeMounts:
             - { name: jenkins-home, mountPath: /var/jenkins_home }
             - { name: config, mountPath: /config }
+            - { name: tmp, mountPath: /tmp }
       containers:
         - name: jenkins
           image: jenkins/jenkins:2.462.3-lts-jdk17
@@ -207,7 +212,7 @@ spec:
                 name: jenkins-oidc     # OIDC_CLIENT_ID / OIDC_CLIENT_SECRET / OIDC_TENANT_ID
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true   # writes go to the PVC and the /tmp emptyDir
             capabilities:
               drop: ["ALL"]
           resources:
@@ -229,7 +234,11 @@ spec:
           volumeMounts:
             - { name: jenkins-home, mountPath: /var/jenkins_home }
             - { name: config, mountPath: /config, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
       volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi
         - name: jenkins-home
           persistentVolumeClaim:
             claimName: jenkins-home
@@ -290,3 +299,66 @@ spec:
                 name: jenkins
                 port:
                   number: 8080
+---
+# Zero Trust: deny everything, then allow only the ingress controller (UI/webhooks),
+# in-namespace agents (50000) and Prometheus scrapes.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: jenkins
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: jenkins-controller-ingress
+  namespace: jenkins
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: jenkins
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - { protocol: TCP, port: 8080 }
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - { protocol: TCP, port: 8080 }
+    - from:
+        - podSelector: {}          # build agent pods in this namespace
+      ports:
+        - { protocol: TCP, port: 8080 }
+        - { protocol: TCP, port: 50000 }
+---
+# Builds need DNS, the Kubernetes API, registries, Git and cloud APIs over TLS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: jenkins-egress
+  namespace: jenkins
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - podSelector: {}
+    - ports:
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 22 }

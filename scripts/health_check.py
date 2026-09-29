@@ -3,8 +3,8 @@
 CzarIntel platform health check.
 
 Probes HTTP endpoints, TCP services and (optionally) Prometheus alert state in
-parallel and prints a single RAG status. Used by the Jenkins post-deploy stage,
-the on-call runbook and as a synthetic check from outside the cluster.
+parallel and prints a single RAG status. Used for post-deploy verification,
+by the on-call runbooks and as a synthetic check from outside the cluster.
 
 Targets come from a YAML file (default: scripts/health_targets.yml):
 

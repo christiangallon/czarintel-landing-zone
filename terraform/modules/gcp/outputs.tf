@@ -27,3 +27,7 @@ output "api_service_gsa_email" {
   description = "Annotate the KSA with iam.gke.io/gcp-service-account=<this>."
   value       = google_service_account.api_service.email
 }
+
+output "bigquery_dataset_id" {
+  value = google_bigquery_dataset.analytics.dataset_id
+}

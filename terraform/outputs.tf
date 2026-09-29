@@ -38,6 +38,11 @@ output "aws_api_service_irsa_role_arn" {
   value       = try(module.aws[0].api_service_irsa_role_arn, null)
 }
 
+output "aws_jenkins_agent_irsa_role_arn" {
+  description = "IAM role assumed by Jenkins agents via IRSA for ECR push (annotate the jenkins-agent ServiceAccount)."
+  value       = try(module.aws[0].jenkins_agent_irsa_role_arn, null)
+}
+
 output "aws_ecr_repository_url" {
   description = "ECR repository URL for the api-service image."
   value       = try(module.aws[0].ecr_repository_url, null)
@@ -85,4 +90,9 @@ output "kubeconfig_commands" {
     var.enable_azure ? "az aks get-credentials --resource-group ${module.azure[0].resource_group_name} --name ${module.azure[0].aks_cluster_name} --context aks-${var.environment}" : "",
     var.enable_gcp ? "gcloud container clusters get-credentials ${module.gcp[0].gke_cluster_name} --region ${var.gcp_region} --project ${var.gcp_project_id}" : "",
   ])
+}
+
+output "gcp_bigquery_dataset_id" {
+  description = "BigQuery dataset for de-identified analytics / ML features."
+  value       = try(module.gcp[0].bigquery_dataset_id, null)
 }

@@ -122,3 +122,15 @@ variable "api_service_account" {
   type        = string
   default     = "api-service"
 }
+
+variable "jenkins_namespace" {
+  description = "Kubernetes namespace of the Jenkins agent ServiceAccount trusted by IRSA."
+  type        = string
+  default     = "jenkins"
+}
+
+variable "jenkins_agent_service_account" {
+  description = "Kubernetes ServiceAccount used by Jenkins build agents (ECR push via IRSA)."
+  type        = string
+  default     = "jenkins-agent"
+}

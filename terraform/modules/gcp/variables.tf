@@ -76,3 +76,15 @@ variable "backup_retention_days" {
   type    = number
   default = 365
 }
+
+variable "analytics_retention_days" {
+  description = "Partition expiry for BigQuery analytics tables (days)."
+  type        = number
+  default     = 400
+}
+
+variable "analytics_viewer_groups" {
+  description = "Google groups granted read-only access to the analytics dataset."
+  type        = list(string)
+  default     = []
+}

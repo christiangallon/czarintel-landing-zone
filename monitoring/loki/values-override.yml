@@ -1,0 +1,119 @@
+# =============================================================================
+# CzarIntel — Loki (log aggregation) values for grafana/loki chart 6.16.0
+#
+#   helm repo add grafana https://grafana.github.io/helm-charts
+#   helm upgrade --install loki grafana/loki --version 6.16.0 \
+#     -n monitoring -f monitoring/loki/values-override.yml
+#
+# Topology: SingleBinary + gateway. Fluent Bit (DaemonSet on EKS, systemd
+# service on VMs via ansible/roles/fluent_bit) pushes to
+# http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push, which is
+# the exact URL Grafana's `loki` datasource uses (monitoring/prometheus).
+#
+# Retention: 90 days hot (HIPAA 164.312(b) audit controls, PCI 10.7 requires
+# 3 months immediately available). Long-term (1y+) archive lives in the
+# versioned, KMS-encrypted S3 backup bucket (terraform/modules/aws).
+#
+# The monitoring namespace enforces Pod Security "restricted"; every pod below
+# runs non-root, read-only root FS, all capabilities dropped, seccomp default.
+# =============================================================================
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false            # single-tenant; access is gated by Grafana (Entra ID SSO)
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  limits_config:
+    retention_period: 2160h      # 90 days
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+    ingestion_rate_mb: 16
+    ingestion_burst_size_mb: 32
+    max_query_series: 5000
+    volume_enabled: true
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+    working_directory: /var/loki/compactor
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: gp3
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits:   { cpu: "2",  memory: 4Gi }
+  podLabels:
+    czarintel.io/owner: platform-engineering
+    czarintel.io/cost-center: CZ-1000
+
+gateway:
+  enabled: true
+  replicas: 2
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+  resources:
+    requests: { cpu: 50m,  memory: 64Mi }
+    limits:   { cpu: 250m, memory: 256Mi }
+
+# Scalable-mode targets disabled in SingleBinary mode
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
+
+# Memcached caches are unnecessary at this log volume; re-enable when
+# ingest exceeds ~50 GB/day.
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+
+# Built-in canary + self-monitoring disabled: Loki is scraped by the
+# kube-prometheus-stack ServiceMonitor below instead.
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+monitoring:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: kps

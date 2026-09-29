@@ -689,6 +689,65 @@ resource "aws_ecr_lifecycle_policy" "api_service" {
 }
 
 ###############################################################################
+# IRSA — Jenkins CI agents (ECR push only, no static AWS keys in Jenkins)
+###############################################################################
+data "aws_iam_policy_document" "jenkins_agent_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.eks.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_issuer_host}:sub"
+      values   = ["system:serviceaccount:${var.jenkins_namespace}:${var.jenkins_agent_service_account}"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_issuer_host}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "jenkins_agent" {
+  name                 = "${var.name_prefix}-jenkins-agent"
+  assume_role_policy   = data.aws_iam_policy_document.jenkins_agent_assume.json
+  max_session_duration = 3600
+  tags                 = merge(local.tags, { Name = "${var.name_prefix}-jenkins-agent" })
+}
+
+data "aws_iam_policy_document" "jenkins_agent" {
+  statement {
+    sid       = "EcrAuthToken"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "PushApiServiceImages"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:BatchGetImage",
+      "ecr:CompleteLayerUpload",
+      "ecr:DescribeImages",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:InitiateLayerUpload",
+      "ecr:PutImage",
+      "ecr:UploadLayerPart",
+    ]
+    resources = [aws_ecr_repository.api_service.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "jenkins_agent" {
+  name   = "ecr-push-api-service"
+  role   = aws_iam_role.jenkins_agent.id
+  policy = data.aws_iam_policy_document.jenkins_agent.json
+}
+
+###############################################################################
 # RDS MySQL (Multi-AZ)
 ###############################################################################
 resource "aws_db_subnet_group" "mysql" {

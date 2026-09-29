@@ -75,3 +75,7 @@ output "guardduty_detector_id" {
 output "security_alerts_topic_arn" {
   value = aws_sns_topic.security_alerts.arn
 }
+
+output "jenkins_agent_irsa_role_arn" {
+  value = aws_iam_role.jenkins_agent.arn
+}

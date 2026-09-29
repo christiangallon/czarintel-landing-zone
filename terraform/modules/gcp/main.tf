@@ -28,6 +28,7 @@ resource "google_project_service" "apis" {
     "logging.googleapis.com",
     "monitoring.googleapis.com",
     "storage.googleapis.com",
+    "bigquery.googleapis.com",
   ])
 
   project            = var.project_id
@@ -481,4 +482,97 @@ resource "google_storage_bucket" "backups" {
   }
 
   depends_on = [google_kms_crypto_key_iam_member.storage]
+}
+
+###############################################################################
+# BigQuery — analytics / ML feature store (CMEK, private, least privilege)
+###############################################################################
+resource "google_kms_crypto_key" "bigquery" {
+  name            = "bigquery-analytics"
+  key_ring        = google_kms_key_ring.main.id
+  rotation_period = "7776000s"
+  labels          = var.labels
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+data "google_bigquery_default_service_account" "bq" {
+  project = var.project_id
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_kms_crypto_key_iam_member" "bigquery" {
+  crypto_key_id = google_kms_crypto_key.bigquery.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = "serviceAccount:${data.google_bigquery_default_service_account.bq.email}"
+}
+
+resource "google_bigquery_dataset" "analytics" {
+  dataset_id                 = replace("${var.name_prefix}_analytics", "-", "_")
+  project                    = var.project_id
+  friendly_name              = "CzarIntel platform analytics"
+  description                = "De-identified platform telemetry and ML features. No PHI/PAN may be loaded (HIPAA 164.514 / PCI 3.4)."
+  location                   = upper(var.region)
+  delete_contents_on_destroy = var.environment != "prod"
+  labels                     = merge(var.labels, { data-classification = "internal" })
+
+  default_encryption_configuration {
+    kms_key_name = google_kms_crypto_key.bigquery.id
+  }
+
+  default_partition_expiration_ms = var.analytics_retention_days * 86400000
+
+  depends_on = [google_kms_crypto_key_iam_member.bigquery]
+}
+
+resource "google_bigquery_table" "api_request_events" {
+  dataset_id          = google_bigquery_dataset.analytics.dataset_id
+  project             = var.project_id
+  table_id            = "api_request_events"
+  description         = "Per-request API telemetry (no request bodies, no user identifiers)."
+  deletion_protection = var.environment == "prod"
+  labels              = var.labels
+
+  time_partitioning {
+    type          = "DAY"
+    field         = "event_ts"
+    expiration_ms = var.analytics_retention_days * 86400000
+  }
+
+  require_partition_filter = true
+  clustering               = ["service", "status_code"]
+
+  encryption_configuration {
+    kms_key_name = google_kms_crypto_key.bigquery.id
+  }
+
+  schema = jsonencode([
+    { name = "event_ts", type = "TIMESTAMP", mode = "REQUIRED", description = "Request completion time (UTC)" },
+    { name = "service", type = "STRING", mode = "REQUIRED", description = "Emitting service name" },
+    { name = "cloud", type = "STRING", mode = "REQUIRED", description = "aws | azure | gcp" },
+    { name = "method", type = "STRING", mode = "REQUIRED", description = "HTTP method" },
+    { name = "route", type = "STRING", mode = "REQUIRED", description = "Templated route, never the raw path" },
+    { name = "status_code", type = "INT64", mode = "REQUIRED", description = "HTTP status code" },
+    { name = "latency_ms", type = "FLOAT64", mode = "REQUIRED", description = "Server-side latency" },
+    { name = "trace_id", type = "STRING", mode = "NULLABLE", description = "W3C trace id for correlation" },
+  ])
+}
+
+# api-service GSA may append telemetry rows — dataset-scoped, not project-wide
+resource "google_bigquery_dataset_iam_member" "api_service_writer" {
+  dataset_id = google_bigquery_dataset.analytics.dataset_id
+  project    = var.project_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${google_service_account.api_service.email}"
+}
+
+resource "google_bigquery_dataset_iam_member" "analysts_viewer" {
+  for_each   = toset(var.analytics_viewer_groups)
+  dataset_id = google_bigquery_dataset.analytics.dataset_id
+  project    = var.project_id
+  role       = "roles/bigquery.dataViewer"
+  member     = "group:${each.value}"
 }

@@ -9,7 +9,9 @@
 // never holds production cluster credentials (pull-based deployment).
 //
 // Required Jenkins credentials:
-//   aws-ecr-push        (AWS Credentials)   — IAM user/role limited to ECR push
+//   (none for AWS)      — ECR push uses IRSA: the jenkins-agent ServiceAccount
+//                         assumes czarintel-prod-jenkins-agent via EKS OIDC
+//                         (1h STS session, ECR push on api-service repo only)
 //   gitops-deploy-key   (SSH private key)   — write access to the GitOps repo
 //   slack-webhook-url   (Secret text)       — incoming webhook URL
 // =============================================================================
@@ -241,16 +243,17 @@ spec:
         anyOf { branch 'main'; branch pattern: 'release/.*', comparator: 'REGEXP' }
       }
       steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-ecr-push',
-                          accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
-          container('tools') {
-            // Short-lived (12h) ECR token, written to the ephemeral workspace only
-            sh '''
-              set +x
-              umask 077
-              aws ecr get-login-password --region ${AWS_REGION} > .ecr-token
-            '''
-          }
+        // No static AWS keys: the aws CLI resolves short-lived STS credentials
+        // from the projected IRSA token (AWS_ROLE_ARN / AWS_WEB_IDENTITY_TOKEN_FILE
+        // injected by the EKS pod identity webhook on the jenkins-agent SA).
+        container('tools') {
+          // Short-lived (12h) ECR token, written to the ephemeral workspace only
+          sh '''
+            set +x
+            umask 077
+            aws sts get-caller-identity --query Arn --output text
+            aws ecr get-login-password --region ${AWS_REGION} > .ecr-token
+          '''
         }
         container('crane') {
           sh '''

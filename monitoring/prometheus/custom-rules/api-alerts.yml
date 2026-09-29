@@ -43,7 +43,7 @@ spec:
           annotations:
             summary: "HTTP 5xx error rate above 1% for {{ $labels.job }} in {{ $labels.namespace }}"
             description: "{{ $value | humanizePercentage }} of requests are failing with 5xx (threshold 1%) for the last 5 minutes."
-            runbook_url: https://github.com/czarintel/czarintel-landing-zone/wiki/runbooks#higherrorrate
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/blob/main/docs/runbooks/incident-response.md#higherrorrate
 
         - alert: HighLatency
           expr: job_namespace:http_request_duration_seconds:p95_5m > 0.5
@@ -54,7 +54,7 @@ spec:
           annotations:
             summary: "p95 latency above 500ms for {{ $labels.job }} in {{ $labels.namespace }}"
             description: "p95 request latency is {{ $value | humanizeDuration }} (threshold 500ms)."
-            runbook_url: https://github.com/czarintel/czarintel-landing-zone/wiki/runbooks#highlatency
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/blob/main/docs/runbooks/incident-response.md#highlatency
 
         - alert: ErrorBudgetBurnFast
           # Multi-window burn rate (Google SRE workbook): 14.4x burn over 1h & 5m
@@ -73,6 +73,7 @@ spec:
           annotations:
             summary: "Error budget burning 14x faster than sustainable in {{ $labels.namespace }}"
             description: "At this rate the 30-day 99.9% error budget is exhausted in ~2 days."
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/blob/main/docs/runbooks/incident-response.md#errorbudgetburnfast
 
         - alert: ApiServiceDown
           expr: absent(up{job=~".*api-service.*"} == 1)
@@ -83,6 +84,7 @@ spec:
           annotations:
             summary: "No healthy api-service targets are being scraped"
             description: "Prometheus has not successfully scraped any api-service pod for 3 minutes."
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/blob/main/docs/runbooks/incident-response.md#apiservicedown
 
     # ------------------------- Kubernetes alerts ----------------------------
     - name: czarintel-kubernetes
@@ -97,7 +99,7 @@ spec:
           annotations:
             summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
             description: "Container {{ $labels.container }} restarted {{ $value | humanize }} times in the last 15 minutes."
-            runbook_url: https://github.com/czarintel/czarintel-landing-zone/wiki/runbooks#podcrashlooping
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/blob/main/docs/runbooks/incident-response.md#podcrashlooping
 
         - alert: DeploymentReplicasMismatch
           expr: |
@@ -109,6 +111,7 @@ spec:
           annotations:
             summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has unavailable replicas"
             description: "Desired and available replica counts have differed for 15 minutes."
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/blob/main/docs/runbooks/incident-response.md#deploymentreplicasmismatch
 
         - alert: HPAMaxedOut
           expr: |
@@ -120,6 +123,7 @@ spec:
           annotations:
             summary: "HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} at max replicas"
             description: "Autoscaler has been pinned at maxReplicas for 15 minutes — raise the ceiling or add capacity."
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/blob/main/docs/runbooks/incident-response.md#hpamaxedout
 
     # ------------------------- Node alerts ----------------------------------
     - name: czarintel-nodes
@@ -134,7 +138,7 @@ spec:
           annotations:
             summary: "Node {{ $labels.instance }} CPU above 85%"
             description: "CPU utilisation is {{ $value | printf \"%.1f\" }}% for 10 minutes."
-            runbook_url: https://github.com/czarintel/czarintel-landing-zone/wiki/runbooks#nodehighcpu
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/blob/main/docs/runbooks/incident-response.md#nodehighcpu
 
         - alert: NodeDiskFillingUp
           expr: |
@@ -146,6 +150,7 @@ spec:
             team: sre
           annotations:
             summary: "Disk on {{ $labels.instance }} ({{ $labels.mountpoint }}) predicted to fill within 24h"
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/blob/main/docs/runbooks/incident-response.md#nodediskfillingup
 
     # ------------------------- MySQL alerts ---------------------------------
     - name: czarintel-mysql
@@ -159,7 +164,7 @@ spec:
           annotations:
             summary: "MySQL is unreachable ({{ $labels.namespace }}/{{ $labels.pod }})"
             description: "mysqld-exporter cannot connect to MySQL, or no exporter is being scraped."
-            runbook_url: https://github.com/czarintel/czarintel-landing-zone/wiki/runbooks#mysqldown
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/blob/main/docs/runbooks/incident-response.md#mysqldown
 
         - alert: MySQLTooManyConnections
           expr: |
@@ -172,6 +177,7 @@ spec:
           annotations:
             summary: "MySQL connections above 80% of max_connections"
             description: "{{ $value | humanizePercentage }} of max_connections in use."
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/blob/main/docs/runbooks/incident-response.md#mysqltoomanyconnections
 
         - alert: MySQLSlowQueries
           expr: increase(mysql_global_status_slow_queries[5m]) > 10
@@ -182,3 +188,4 @@ spec:
           annotations:
             summary: "MySQL slow query rate elevated"
             description: "{{ $value | humanize }} slow queries in the last 5 minutes."
+            runbook_url: https://github.com/czarintel/czarintel-landing-zone/blob/main/docs/runbooks/incident-response.md#mysqlslowqueries
